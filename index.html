@@ -39,6 +39,11 @@
   table.keys td { padding: 3px 6px; border-bottom: 1px solid #1f2850; }
   table.keys td:first-child { font-weight: 700; color: #ffd23f; white-space: nowrap; }
   .stack > * + * { margin-top: 8px; }
+  .chars { display: flex; gap: 8px; margin: 6px 0 12px; }
+  .char { flex: 1; padding: 10px; border-radius: 10px; background: #1a2142; border: 2px solid #2c3766; cursor: pointer; text-align: left; }
+  .char.sel { border-color: #ffd23f; }
+  .char b { display: block; color: #fff; }
+  .char span { font-size: 12px; color: #8aa0c8; }
 </style>
 </head>
 <body>
@@ -50,6 +55,8 @@
   <label for="nameInput">Tu nombre</label>
   <input id="nameInput" maxlength="12" placeholder="Jugador">
   <div id="colorPick" class="colors"></div>
+  <label>Personaje</label>
+  <div id="charPickMenu" class="chars"></div>
   <button id="btnHost">Crear sala</button>
   <div class="row">
     <input id="codeInput" maxlength="4" placeholder="CÓDIGO">
@@ -76,6 +83,7 @@
   <p class="muted">Código de sala</p>
   <div id="lobbyCode" class="code">----</div>
   <p id="lobbyRole" class="muted"></p>
+  <div id="charPickLobby" class="chars"></div>
   <ul id="lobbyList" class="list"></ul>
   <div class="stack">
     <button id="btnStart">Empezar carrera</button>
@@ -94,6 +102,62 @@
     <button id="btnExit" class="alt">Salir al menú</button>
   </div>
 </div>
+
+<script>
+// =====================================================================
+// ARTE — aquí van los dibujos. Mientras un "src" esté vacío se usa el
+// dibujo provisional, así que se pueden ir añadiendo de uno en uno.
+//
+// · Personajes: UN dibujo por estado (sin animaciones). El juego cambia
+//   de dibujo según lo que esté haciendo el personaje.
+//   Dibujos mirando a la DERECHA (el juego los voltea solo), con los pies
+//   tocando el borde de abajo de la imagen. Cualquier tamaño: se escalan
+//   a "height" píxeles de alto manteniendo la proporción.
+//   Si falta un estado se usa "quieto"; si falta "quieto", el provisional.
+// · images: dibujos sueltos (objetos e iconos de habilidades).
+// · Cada valor puede ser una ruta ('sprites/rafael_correr.png', junto al
+//   HTML) o la imagen incrustada ('data:image/png;base64,...') para que
+//   todo siga en un único archivo. Usad PNG con fondo transparente.
+// =====================================================================
+const ART = {
+  basico: { height: 56, states: {} },
+  rafael: {
+    height: 56,
+    states: {
+      quieto: '',      // parado
+      correr: '',      // caminando o corriendo
+      saltar: '',      // en el aire
+      agachado: '',    // agachado o deslizándose
+      escalera: '',    // subiendo/bajando escaleras (de espaldas o de lado)
+      aturdido: '',    // aturdido o congelado
+      agarrando: '',   // con otro jugador levantado encima de la cabeza
+      agarrado: '',    // hecho una bola, cuando le agarran
+      rezando: '',     // habilidad 1
+      comiendo: '',    // habilidad 2 (comiendo hamburguesa)
+    },
+  },
+  gordash: {
+    height: 68,
+    states: {
+      quieto: '', correr: '', saltar: '', agachado: '', escalera: '',
+      aturdido: '', agarrando: '', agarrado: '',
+    },
+  },
+  familiar: {
+    height: 40,
+    states: {
+      cayendo: '',     // cayendo del cielo
+      persiguiendo: '', // corriendo detrás del rival
+    },
+  },
+  images: {
+    hamburguesa_buena: '', hamburguesa_normal: '', hamburguesa_mala: '',
+    rayo: '', dios_gordo: '',
+    icono_rezar: '', icono_hamburguesa: '', icono_familia: '', icono_gordash: '',
+    icono_mantequilla: '', icono_rayos: '', icono_dios_gordo: '',
+  },
+};
+</script>
 
 <script>
 'use strict';
@@ -140,10 +204,24 @@ const CONFIG = {
   CONNECT_TIMEOUT: 10000,
 };
 
+// Rafael / Gordash (velocidades = multiplicador sobre la velocidad normal)
+const RAFAEL = {
+  SPEED: 0.9,
+  PRAY_SLOW: 0.6, PRAY_TIME: 3, PRAY_CD: 8,                 // rival aleatorio al 60% de velocidad
+  BURGER_GOOD: 0.5, BURGER_NORMAL: 0.2,                      // probabilidades (el resto = mala)
+  BURGER_GOOD_MULT: 1.35, BURGER_BAD_MULT: 0.7, BURGER_TIME: 4, BURGER_CD: 10,
+  FAMILY_WARN: 0.8, FAMILY_DROP: 360, FAMILY_FALL_SPEED: 1400, FAMILY_STUN: 1,
+  FAMILY_CHASE: 4, FAMILY_SPEED: 250, FAMILY_W: 20, FAMILY_H: 30, FAMILY_CD: 16,
+  GORDASH_TIME: 30, GORDASH_SPEED: 1.3, GORDASH_CD: 50,    // el cooldown empieza al volver a ser Rafael
+  BUTTER_SPEED: 900, BUTTER_TIME: 0.18, BUTTER_CHARGES: 3,  // ~5 casillas
+  RAYS_PUSH_SPEED: 512, RAYS_PUSH_TIME: 0.25, RAYS_CHARGES: 2, // ~4 casillas hacia atrás
+  FATGOD_TIME: 3, FATGOD_CHARGES: 1,
+};
+
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#ff6fb5'];
 
 // Flags de estado que se envían por red
-const F = { CROUCH: 1, CLIMB: 2, STUN: 4, FROZEN: 8, SLOW: 16, SHIELD: 32, GRABBED: 64, HOLDING: 128, FINISHED: 256, DASH: 512, SLIDE: 1024 };
+const F = { CROUCH: 1, CLIMB: 2, STUN: 4, FROZEN: 8, SLOW: 16, SHIELD: 32, GRABBED: 64, HOLDING: 128, FINISHED: 256, DASH: 512, SLIDE: 1024, GORDASH: 2048 };
 
 // =====================================================================
 // 2. MAPAS — se dibujan en texto. Cada segmento se alinea abajo y se
@@ -365,10 +443,10 @@ class BotCtrl {
 // 4. JUGADOR — física y estados
 // =====================================================================
 class Player {
-  constructor(id, name, color, local) {
+  constructor(id, name, color, local, char) {
     this.id = id; this.name = name; this.color = color; this.local = local;
+    this.char = validChar(char);  // clave de CHARACTERS
     this.w = CONFIG.PLAYER_W;
-    this.abilities = ABILITIES;   // más adelante: el set del personaje elegido
     this.buf = [];                // muestras de red (solo jugadores remotos)
     this.reset(0, 0);
   }
@@ -379,9 +457,14 @@ class Player {
     this.stunT = 0; this.freezeT = 0; this.slowT = 0; this.shieldT = 0; this.dashT = 0; this.enemyImmuneT = 0;
     this.grabbedBy = null; this.holding = null; this.mash = 0; this.escapeSent = false; this.grabCd = 0; this.grabAnim = 0;
     this.cooldowns = [0, 0, 0, 0];
+    this.charges = [0, 0, 0, 0];                 // habilidades por cargas (formas como Gordash)
+    this.form = null; this.formT = 0;            // transformación activa
+    this.slowMult = 1; this.buffT = 0; this.buffMult = 1;
+    this.knockT = 0; this.knockVx = 0;           // empujón que ignora el control
+    this.dashSpeed = CONFIG.DASH_SPEED; this.butter = false;
     this.finished = false;
     this.checkpoint = { x, y };
-    this.rx = x; this.ry = y; this.rflags = 0; this.rfacing = 1; this.buf = [];
+    this.rx = x; this.ry = y; this.rvx = 0; this.rvy = 0; this.rflags = 0; this.rfacing = 1; this.buf = [];
   }
   flags() {
     let f = 0;
@@ -396,6 +479,7 @@ class Player {
     if (this.finished) f |= F.FINISHED;
     if (this.dashT > 0) f |= F.DASH;
     if (this.slideT > 0) f |= F.SLIDE;
+    if (this.form === 'gordash') f |= F.GORDASH;
     return f;
   }
   stateArray() {
@@ -483,9 +567,10 @@ function startClimb(p, tx) {
 
 function stepPlayer(p, ctrl, dt) {
   const C = CONFIG, map = G.map, T = C.TILE;
-  for (const k of ['coyote', 'jumpBuf', 'dropT', 'slideT', 'stunT', 'freezeT', 'slowT', 'shieldT', 'dashT', 'enemyImmuneT', 'grabCd', 'grabAnim'])
+  for (const k of ['coyote', 'jumpBuf', 'dropT', 'slideT', 'stunT', 'freezeT', 'slowT', 'shieldT', 'dashT', 'enemyImmuneT', 'grabCd', 'grabAnim', 'buffT', 'knockT'])
     p[k] = Math.max(0, p[k] - dt);
   for (let i = 0; i < 4; i++) p.cooldowns[i] = Math.max(0, p.cooldowns[i] - dt);
+  if (p.form) { p.formT -= dt; if (p.formT <= 0) endForm(p); }
 
   // Agarrado: va encima del agarrador; solo puede machacar A/D para escaparse
   if (p.grabbedBy != null) {
@@ -556,10 +641,13 @@ function stepPlayer(p, ctrl, dt) {
   // Movimiento horizontal
   let max = ctrl.down('run') ? C.RUN_SPEED : C.WALK_SPEED;
   if (p.crouch) max = C.CROUCH_SPEED;
-  if (p.slowT > 0) max *= C.SLOW_MULT;
+  max *= speedMult(p);
   if (p.holding != null) max *= C.HOLD_SPEED_MULT;
   if (p.dashT > 0) {
-    p.vx = p.facing * C.DASH_SPEED;
+    p.vx = p.facing * p.dashSpeed;
+    if (p.butter) G.fx.push({ x: p.x - p.facing * 10, y: p.y - 2, vx: 0, vy: -20, life: 0.4, color: '#ffe066' });
+  } else if (p.knockT > 0) {
+    p.vx = p.knockVx;
   } else if (p.slideT > 0 && p.crouch) {
     p.vx = approach(p.vx, 0, C.SLIDE_FRICTION * dt);
     if (Math.abs(p.vx) < C.CROUCH_SPEED) p.slideT = 0;
@@ -607,8 +695,8 @@ function respawn(p) {
   puff(p.x, p.y - 20, '#ffffff', 12);
 }
 
-function stun(p, dir) {
-  p.stunT = CONFIG.STUN_TIME; p.enemyImmuneT = CONFIG.STUN_IMMUNE;
+function stun(p, dir, dur) {
+  p.stunT = dur || CONFIG.STUN_TIME; p.enemyImmuneT = CONFIG.STUN_IMMUNE;
   p.vx = dir * CONFIG.STUN_KNOCK_X; p.vy = CONFIG.STUN_KNOCK_Y;
   p.climbing = false; p.dashT = 0; p.slideT = 0;
   if (p.holding != null) sendIntent(p, { k: 'drop' });
@@ -642,24 +730,91 @@ function checkEnemies(p) {
 }
 
 // =====================================================================
-// 6. HABILIDADES — de prueba; cada personaje tendrá su propio set
+// 6. PERSONAJES Y HABILIDADES
+//    Cada habilidad: { key, name, icon, use(p) } y además
+//    · cd: segundos de recarga, o
+//    · charges + gap: usos por transformación y pausa entre usos, o
+//    · passive: solo ocupa el hueco (no hace nada al pulsarla)
+//    Lo que afecta a otros jugadores se pide al anfitrión con sendIntent.
 // =====================================================================
-const ABILITIES = [
-  { key: 'Y', name: 'Dash', tier: 'Débil', cd: 3,
-    use(p) { p.dashT = CONFIG.DASH_TIME; p.vy = 0; p.climbing = false; } },
-  { key: 'U', name: 'Proyectil', tier: 'Media', cd: 7,
+const BASICO_KIT = [
+  { key: 'Y', name: 'Dash', cd: 3,
+    use(p) { p.dashT = CONFIG.DASH_TIME; p.dashSpeed = CONFIG.DASH_SPEED; p.butter = false; p.vy = 0; p.climbing = false; } },
+  { key: 'U', name: 'Proyectil', cd: 7,
     use(p) { sendIntent(p, { k: 'proj', x: p.x + p.facing * 18, y: p.y - p.h * 0.6, dir: p.facing }); } },
-  { key: 'I', name: 'Escudo', tier: 'Fuerte', cd: 12,
+  { key: 'I', name: 'Escudo', cd: 12,
     use(p) { p.shieldT = CONFIG.SHIELD_TIME; } },
-  { key: 'O', name: 'Congelar', tier: 'Ulti', cd: 45,
+  { key: 'O', name: 'Congelar', cd: 45,
     use(p) { sendIntent(p, { k: 'freeze' }); } },
 ];
 
+const RAFAEL_KIT = [
+  { key: 'Y', name: 'Rezar', icon: 'icono_rezar', cd: RAFAEL.PRAY_CD,
+    use(p) { sendIntent(p, { k: 'pray' }); } },
+  { key: 'U', name: 'Hamburguesa', icon: 'icono_hamburguesa', cd: RAFAEL.BURGER_CD,
+    use(p) {
+      const r = Math.random();
+      const kind = r < RAFAEL.BURGER_GOOD ? 'good' : r < RAFAEL.BURGER_GOOD + RAFAEL.BURGER_NORMAL ? 'normal' : 'bad';
+      if (kind !== 'normal') { p.buffT = RAFAEL.BURGER_TIME; p.buffMult = kind === 'good' ? RAFAEL.BURGER_GOOD_MULT : RAFAEL.BURGER_BAD_MULT; }
+      sendIntent(p, { k: 'fx', fx: 'burger-' + kind });
+    } },
+  { key: 'I', name: 'Familia', icon: 'icono_familia', cd: RAFAEL.FAMILY_CD,
+    use(p) { sendIntent(p, { k: 'family' }); } },
+  { key: 'O', name: 'Gordash', icon: 'icono_gordash', cd: RAFAEL.GORDASH_CD,
+    use(p) { startForm(p, 'gordash'); sendIntent(p, { k: 'fx', fx: 'gordash' }); } },
+];
+
+const GORDASH_KIT = [
+  { key: 'Y', name: 'Mantequilla', icon: 'icono_mantequilla', charges: RAFAEL.BUTTER_CHARGES, gap: 0.4,
+    use(p) { p.dashT = RAFAEL.BUTTER_TIME; p.dashSpeed = RAFAEL.BUTTER_SPEED; p.butter = true; p.vy = 0; p.climbing = false; } },
+  { key: 'U', name: 'Rayos', icon: 'icono_rayos', charges: RAFAEL.RAYS_CHARGES, gap: 1,
+    use(p) { sendIntent(p, { k: 'rays' }); } },
+  { key: 'I', name: 'Dios gordo', icon: 'icono_dios_gordo', charges: RAFAEL.FATGOD_CHARGES, gap: 1,
+    use(p) { sendIntent(p, { k: 'fatgod' }); } },
+  { key: 'O', name: 'Gordash', icon: 'icono_gordash', passive: true },
+];
+
+const CHARACTERS = {
+  basico: { name: 'Básico', desc: 'Habilidades de prueba', speedMult: 1, art: 'basico', abilities: BASICO_KIT },
+  rafael: { name: 'Rafael', desc: 'Lento, pero con ayuda divina', speedMult: RAFAEL.SPEED, art: 'rafael', abilities: RAFAEL_KIT,
+            forms: { gordash: { name: 'Gordash', speedMult: RAFAEL.GORDASH_SPEED, art: 'gordash', duration: RAFAEL.GORDASH_TIME, abilities: GORDASH_KIT } } },
+};
+const validChar = c => Object.prototype.hasOwnProperty.call(CHARACTERS, c) ? c : 'basico';
+
+function formOf(p) { return p.form ? CHARACTERS[p.char].forms[p.form] : null; }
+function abilitiesOf(p) { return (formOf(p) || CHARACTERS[p.char]).abilities; }
+
+function speedMult(p) {
+  let m = (formOf(p) || CHARACTERS[p.char]).speedMult;
+  if (p.slowT > 0) m *= p.slowMult;
+  if (p.buffT > 0) m *= p.buffMult;
+  return m;
+}
+
 function useAbility(p, i) {
-  const a = p.abilities[i];
-  if (!a || p.cooldowns[i] > 0) return;
+  const a = abilitiesOf(p)[i];
+  if (!a || a.passive || p.cooldowns[i] > 0) return;
+  if (a.charges) {
+    if (p.charges[i] <= 0) return;
+    p.charges[i]--;
+    p.cooldowns[i] = a.gap;
+  } else {
+    p.cooldowns[i] = a.cd;
+  }
   a.use(p);
-  p.cooldowns[i] = a.cd;
+}
+
+function startForm(p, form) {
+  const f = CHARACTERS[p.char].forms[form];
+  p.form = form; p.formT = f.duration;
+  p.cooldowns = [0, 0, 0, 0];
+  p.charges = f.abilities.map(a => a.charges || 0);
+}
+
+function endForm(p) {
+  p.form = null; p.formT = 0; p.charges = [0, 0, 0, 0];
+  p.cooldowns = CHARACTERS[p.char].abilities.map((a, i) => i === 3 ? a.cd : 0);
+  puff(p.x, p.y - 24, '#ffd23f', 16);
 }
 
 // =====================================================================
@@ -742,13 +897,15 @@ const G = {
   mode: 'menu',          // menu | lobby | countdown | race | results
   net: null, isHost: false, offline: false,
   myId: null, code: '', nextId: 1,
-  lobby: [],             // [{id, name, color, bot?}]
+  lobby: [],             // [{id, name, color, char, bot?}]
   players: new Map(), localPlayers: [], ctrls: new Map(),
   map: null, raceTime: 0, countdown: 0,
   deadEnemies: new Set(), projectiles: [], grabPairs: new Map(), finishInfo: new Map(),
+  minionView: new Map(), // familiares vistos por un cliente (el anfitrión usa srv.minions)
+  beams: [], bubbles: new Map(), fatGodT: 0, fatGodTotal: 1, fatGodMini: 0,
   srv: null,             // datos solo del anfitrión
   netTimer: 0, camX: 0, camY: 0, fx: [], toasts: [], freezeFlash: 0,
-  myName: 'Jugador', myColor: COLORS[0],
+  myName: 'Jugador', myColor: COLORS[0], myChar: 'basico',
 };
 
 function sendIntent(p, msg) {
@@ -773,7 +930,7 @@ function startHosting() {
   G.net = new Net('host'); G.isHost = true; G.offline = false;
   G.nextId = 1;
   G.myId = 0;
-  G.lobby = [{ id: 0, name: G.myName, color: G.myColor }];
+  G.lobby = [{ id: 0, name: G.myName, color: G.myColor, char: G.myChar }];
   setMenuMsg('Creando sala…');
   G.net.hostRoom(code => {
     G.code = code; G.mode = 'lobby';
@@ -785,8 +942,8 @@ function startPractice() {
   readMenu();
   G.net = new Net('offline'); G.isHost = true; G.offline = true;
   G.myId = 0; G.code = '';
-  G.lobby = [{ id: 0, name: G.myName, color: G.myColor },
-             { id: 1, name: 'Muñeco', color: G.myColor === '#95a5a6' ? '#7f8c8d' : '#95a5a6', bot: true }];
+  G.lobby = [{ id: 0, name: G.myName, color: G.myColor, char: G.myChar },
+             { id: 1, name: 'Muñeco', color: '#95a5a6', char: 'basico', bot: true }];
   hostStart();
 }
 
@@ -807,7 +964,7 @@ function hostHello(conn, d) {
   const id = G.nextId++;
   conn.playerId = id;
   G.net.conns.set(id, conn);
-  G.lobby.push({ id, name: cleanName(d.name), color: freeColor(d.color) });
+  G.lobby.push({ id, name: cleanName(d.name), color: freeColor(d.color), char: validChar(d.char) });
   conn.send({ t: 'welcome', id, code: G.code });
   hostBroadcastLobby();
 }
@@ -846,8 +1003,21 @@ function hostHandle(id, msg) {
     if (p && !p.local) pushSample(p, msg.s);
   } else if (msg.t === 'intent') {
     hostIntent(id, msg);
+  } else if (msg.t === 'pick') {
+    const entry = G.lobby.find(p => p.id === id);
+    if (G.mode === 'lobby' && entry) { entry.char = validChar(msg.char); hostBroadcastLobby(); }
   }
 }
+
+// Primer suelo (o plataforma) bajo un punto; si no hay, el propio punto
+function groundBelow(map, x, y) {
+  const T = CONFIG.TILE, tx = Math.floor(x / T);
+  for (let ty = Math.floor(y / T); ty < map.H; ty++)
+    if (isSolid(tileAt(map, tx, ty)) || isOneWay(map, tx, ty)) return ty * T;
+  return y;
+}
+
+const FX_KINDS = new Set(['burger-good', 'burger-normal', 'burger-bad', 'gordash']);
 
 function hostIntent(id, msg) {
   const S = G.srv;
@@ -907,6 +1077,46 @@ function hostIntent(id, msg) {
       }
       break;
     }
+    case 'pray': {
+      const cands = [...G.players.values()].filter(p => {
+        const o = p.id !== id && hostState(p.id);
+        return o && !(o.flags & F.FINISHED);
+      });
+      if (!cands.length) return;
+      const v = cands[Math.floor(Math.random() * cands.length)].id;
+      G.net.broadcast({ t: 'ev', k: 'fx', id, fx: 'pray' });
+      G.net.broadcast({ t: 'ev', k: 'beam', v, kind: 'pray' });
+      if (!(hostState(v).flags & F.SHIELD))
+        G.net.broadcast({ t: 'ev', k: 'slow', v, dur: RAFAEL.PRAY_TIME, mult: RAFAEL.PRAY_SLOW });
+      break;
+    }
+    case 'family': {
+      for (const p of G.players.values()) {
+        const o = p.id !== id && hostState(p.id);
+        if (!o || (o.flags & F.FINISHED)) continue;
+        S.minions.push({ id: S.nextMinion++, owner: id, target: p.id, phase: 0, t: RAFAEL.FAMILY_WARN,
+                         x: o.x, y: 0, gy: groundBelow(G.map, o.x, o.y), vx: 0, vy: 0,
+                         w: RAFAEL.FAMILY_W, h: RAFAEL.FAMILY_H, onGround: false });
+      }
+      break;
+    }
+    case 'rays': {
+      for (const p of G.players.values()) {
+        const o = p.id !== id && hostState(p.id);
+        if (!o || (o.flags & F.FINISHED) || o.x <= me.x) continue;   // solo a los que van delante
+        G.net.broadcast({ t: 'ev', k: 'beam', v: p.id, kind: 'ray' });
+        if (o.flags & F.SHIELD) continue;
+        hostReleaseInvolving(p.id);
+        G.net.broadcast({ t: 'ev', k: 'knock', v: p.id });
+      }
+      break;
+    }
+    case 'fatgod':
+      G.net.broadcast({ t: 'ev', k: 'fatgod', by: id, dur: RAFAEL.FATGOD_TIME });
+      break;
+    case 'fx':
+      if (FX_KINDS.has(msg.fx)) G.net.broadcast({ t: 'ev', k: 'fx', id, fx: msg.fx });
+      break;
     case 'stomp': {
       if (Number.isInteger(msg.e) && !S.deadEnemies.has(msg.e)) {
         S.deadEnemies.add(msg.e);
@@ -965,7 +1175,45 @@ function hostTick(dt) {
   }
   S.projectiles = S.projectiles.filter(p => !p.dead);
 
+  hostTickMinions(dt);
+
   if (G.raceTime >= C.RACE_TIME) hostEndRace();
+}
+
+// Familiares de Rafael: aviso -> caen del cielo -> si fallan, persiguen a su rival
+function hostTickMinions(dt) {
+  const S = G.srv, C = CONFIG, R = RAFAEL;
+  for (const m of S.minions) {
+    const o = G.players.has(m.target) && hostState(m.target);
+    if (!o || (o.flags & F.FINISHED)) { m.dead = true; continue; }
+    if (m.phase === 0) {
+      m.t -= dt;
+      if (m.t <= 0) { m.phase = 1; m.y = m.gy - R.FAMILY_DROP; }
+      continue;
+    }
+    if (m.phase === 1) {
+      m.y += R.FAMILY_FALL_SPEED * dt;
+      if (m.y >= m.gy) { m.y = m.gy; m.phase = 2; m.t = R.FAMILY_CHASE; m.onGround = true; }
+    } else {
+      m.t -= dt;
+      if (m.t <= 0) { m.dead = true; G.net.broadcast({ t: 'ev', k: 'minionEnd', id: m.id, x: m.x, y: m.y }); continue; }
+      const dir = Math.sign(o.x - m.x);
+      m.vx = dir * R.FAMILY_SPEED;
+      m.vy = Math.min(m.vy + C.GRAVITY * dt, C.MAX_FALL);
+      moveX(m, G.map, m.vx * dt);
+      const blocked = dir !== 0 && m.vx === 0;
+      moveY(m, G.map, m.vy * dt, false);
+      if (blocked && m.onGround) m.vy = -C.JUMP_VEL;      // salta paredes
+      if (m.y > G.map.pxH + 100) { m.dead = true; continue; }
+    }
+    const th = (o.flags & F.CROUCH) ? C.CROUCH_H : C.PLAYER_H;
+    if (Math.abs(m.x - o.x) < (m.w + C.PLAYER_W) / 2 && m.y > o.y - th && m.y - m.h < o.y) {
+      m.dead = true;
+      G.net.broadcast({ t: 'ev', k: 'minionEnd', id: m.id, x: m.x, y: m.y });
+      if (!(o.flags & F.SHIELD)) G.net.broadcast({ t: 'ev', k: 'stun', v: m.target, dur: R.FAMILY_STUN, dir: Math.sign(o.x - m.x) || 1 });
+    }
+  }
+  S.minions = S.minions.filter(m => !m.dead);
 }
 
 // Corredores reales (los muñecos no cuentan para terminar la carrera)
@@ -998,7 +1246,8 @@ function hostSnapshot() {
     const s = pl.local ? pl.stateArray() : G.srv.latest.get(pl.id);
     if (s) p.push([pl.id, ...s]);
   }
-  G.net.sendAll({ t: 'snap', rt: G.raceTime, p });
+  const m = G.srv.minions.map(n => [n.id, Math.round(n.x), Math.round(n.y), n.phase, Math.round(n.gy), n.owner, Math.round(n.t * 10), n.target]);
+  G.net.sendAll({ t: 'snap', rt: G.raceTime, p, m });
 }
 
 // ---------- Cliente ----------
@@ -1009,7 +1258,7 @@ function joinRoom() {
   G.net = new Net('client'); G.isHost = false; G.offline = false;
   setMenuMsg('Conectando…');
   G.net.joinRoom(code,
-    () => G.net.sendToHost({ t: 'hello', name: G.myName, color: G.myColor }),
+    () => G.net.sendToHost({ t: 'hello', name: G.myName, color: G.myColor, char: G.myChar }),
     d => { if (d && typeof d === 'object') clientHandle(d); },
     () => leaveToMenu('El anfitrión se ha desconectado.'),
     err => leaveToMenu(err));
@@ -1031,6 +1280,14 @@ function clientHandle(msg) {
         const p = G.players.get(e[0]);
         if (p && !p.local) pushSample(p, e.slice(1));
       }
+      const seen = new Set();
+      for (const [id, x, y, phase, gy, owner, t10, target] of (msg.m || [])) {
+        seen.add(id);
+        const m = G.minionView.get(id);
+        if (m) Object.assign(m, { x, y, phase, gy, t: t10 / 10 });
+        else G.minionView.set(id, { id, x, y, rx: x, ry: y, phase, gy, owner, target, t: t10 / 10 });
+      }
+      for (const id of [...G.minionView.keys()]) if (!seen.has(id)) G.minionView.delete(id);
       break;
     }
     case 'ev': applyEvent(msg); break;
@@ -1078,7 +1335,49 @@ function applyEvent(ev) {
       break;
     case 'slow': {
       const v = local(ev.v);
-      if (v && v.shieldT <= 0) v.slowT = ev.dur;
+      if (v && v.shieldT <= 0) {
+        const mult = ev.mult || CONFIG.SLOW_MULT;
+        v.slowMult = v.slowT > 0 ? Math.min(v.slowMult, mult) : mult;
+        v.slowT = Math.max(v.slowT, ev.dur);
+      }
+      break;
+    }
+    case 'beam':
+      G.beams.push({ v: ev.v, kind: ev.kind, t: 0.45 });
+      break;
+    case 'knock': {
+      const v = local(ev.v);
+      if (v && v.shieldT <= 0 && v.grabbedBy == null && !v.finished) {
+        v.knockT = RAFAEL.RAYS_PUSH_TIME; v.knockVx = -RAFAEL.RAYS_PUSH_SPEED;
+        v.vy = Math.min(v.vy, -250); v.climbing = false; v.dashT = 0; v.slideT = 0;
+        if (v.holding != null) sendIntent(v, { k: 'drop' });
+      }
+      break;
+    }
+    case 'stun': {
+      const v = local(ev.v);
+      if (v && v.shieldT <= 0 && v.grabbedBy == null && !v.finished) stun(v, ev.dir, ev.dur);
+      break;
+    }
+    case 'minionEnd':
+      G.minionView.delete(ev.id);
+      puff(ev.x, ev.y - 14, '#c8a27a', 12);
+      break;
+    case 'fatgod': {
+      const me = G.players.get(G.myId);
+      if (me && me.id !== ev.by && me.shieldT <= 0) { G.fatGodT = ev.dur; G.fatGodTotal = ev.dur; }
+      else if (me && me.id === ev.by) G.fatGodMini = ev.dur;
+      toast(nameOf(ev.by) + ' invoca al Dios gordo', '#ffd23f');
+      break;
+    }
+    case 'fx': {
+      G.bubbles.set(ev.id, { fx: ev.fx, t: 1.6 });
+      const p = G.players.get(ev.id);
+      if (ev.fx === 'gordash' && p) {
+        const v = viewOf(p);
+        puff(v.x, v.y - 24, '#ffd23f', 24, 260);
+        toast(p.name + ' se convierte en ¡GORDASH!', '#ffd23f');
+      }
       break;
     }
     case 'freeze':
@@ -1106,7 +1405,7 @@ function startRace(list) {
   G.players.clear(); G.localPlayers = []; G.ctrls.clear();
   list.forEach((info, i) => {
     const local = info.id === G.myId || (G.isHost && !!info.bot);
-    const p = new Player(info.id, info.name, info.color, local);
+    const p = new Player(info.id, info.name, info.color, local, info.char);
     p.bot = !!info.bot;
     p.reset(G.map.spawn.x - i * 10, G.map.spawn.y);
     G.players.set(p.id, p);
@@ -1117,17 +1416,18 @@ function startRace(list) {
   });
   G.deadEnemies.clear(); G.projectiles = []; G.grabPairs.clear(); G.finishInfo.clear();
   G.fx = []; G.toasts = []; G.freezeFlash = 0;
+  G.minionView.clear(); G.beams = []; G.bubbles.clear(); G.fatGodT = 0; G.fatGodMini = 0;
   G.raceTime = 0; G.countdown = CONFIG.COUNTDOWN; G.mode = 'countdown';
   G.camX = 0; G.camY = G.map.pxH - CONFIG.VIEW_H;
   if (G.isHost) {
     G.srv = { latest: new Map(), finish: new Map(), immune: new Map(), grabs: new Map(), holders: new Map(),
-              projectiles: [], deadEnemies: new Set(), nextProj: 1, ended: false };
+              projectiles: [], deadEnemies: new Set(), nextProj: 1, minions: [], nextMinion: 1, ended: false };
   }
   showPanel(null);
 }
 
 function pushSample(p, s) {
-  p.buf.push({ t: performance.now(), x: s[0], y: s[1], flags: s[4], facing: s[5] });
+  p.buf.push({ t: performance.now(), x: s[0], y: s[1], vx: s[2], vy: s[3], flags: s[4], facing: s[5] });
   if (p.buf.length > 30) p.buf.shift();
 }
 
@@ -1139,18 +1439,18 @@ function interp(p, now) {
     if (b[i].t <= rt) {
       const a = b[i], c = b[i + 1], k = Math.min(1, (rt - a.t) / Math.max(1, c.t - a.t));
       p.rx = a.x + (c.x - a.x) * k; p.ry = a.y + (c.y - a.y) * k;
-      p.rflags = c.flags; p.rfacing = c.facing;
+      p.rvx = c.vx; p.rvy = c.vy; p.rflags = c.flags; p.rfacing = c.facing;
       return;
     }
   }
   const s = b[0];
-  p.rx = s.x; p.ry = s.y; p.rflags = s.flags; p.rfacing = s.facing;
+  p.rx = s.x; p.ry = s.y; p.rvx = s.vx; p.rvy = s.vy; p.rflags = s.flags; p.rfacing = s.facing;
 }
 
 // Dónde se dibuja un jugador (local: real; remoto: interpolado)
 function baseView(p) {
-  if (p.local) return { x: p.x, y: p.y, h: p.h, flags: p.flags(), facing: p.facing };
-  return { x: p.rx, y: p.ry, h: (p.rflags & F.CROUCH) ? CONFIG.CROUCH_H : CONFIG.PLAYER_H, flags: p.rflags, facing: p.rfacing };
+  if (p.local) return { x: p.x, y: p.y, vx: p.vx, vy: p.vy, h: p.h, flags: p.flags(), facing: p.facing };
+  return { x: p.rx, y: p.ry, vx: p.rvx, vy: p.rvy, h: (p.rflags & F.CROUCH) ? CONFIG.CROUCH_H : CONFIG.PLAYER_H, flags: p.rflags, facing: p.rfacing };
 }
 function viewOf(p) {
   const v = baseView(p);
@@ -1221,6 +1521,10 @@ function fixedStep(dt) {
   for (const t of G.toasts) t.t -= dt;
   G.toasts = G.toasts.filter(t => t.t > 0);
   G.freezeFlash = Math.max(0, G.freezeFlash - dt);
+  for (const b of G.beams) b.t -= dt;
+  G.beams = G.beams.filter(b => b.t > 0);
+  for (const [id, b] of [...G.bubbles]) if ((b.t -= dt) <= 0) G.bubbles.delete(id);
+  G.fatGodT = Math.max(0, G.fatGodT - dt); G.fatGodMini = Math.max(0, G.fatGodMini - dt);
   Input.endStep();
 }
 
@@ -1365,26 +1669,109 @@ function drawProjectiles(now) {
   }
 }
 
+// ---------- Arte: imágenes de ART cargadas bajo demanda ----------
+const IMG = {};
+function artImage(src) {
+  if (!src) return null;
+  let img = IMG[src];
+  if (!img) { img = IMG[src] = new Image(); img.src = src; }
+  return img.complete && img.naturalWidth ? img : null;
+}
+
+// Qué dibujo toca según lo que está haciendo el jugador
+function stateFor(p, v) {
+  const f = v.flags, b = G.bubbles.get(p.id);
+  if (f & F.GRABBED) return 'agarrado';
+  if (f & (F.STUN | F.FROZEN)) return 'aturdido';
+  if (f & F.HOLDING) return 'agarrando';
+  if (f & F.CLIMB) return 'escalera';
+  if (f & F.CROUCH) return 'agachado';
+  if (Math.abs(v.vy) > 1) return 'saltar';
+  if (b && b.t > 1 && b.fx === 'pray') return 'rezando';
+  if (b && b.t > 1 && b.fx.startsWith('burger')) return 'comiendo';
+  if (Math.abs(v.vx) > 10) return 'correr';
+  return 'quieto';
+}
+
+function drawEyes(cx, ey, facing) {
+  const ex = cx + facing * 4;
+  ctx.fillStyle = '#fff'; ctx.fillRect(ex - 6, ey, 5, 6); ctx.fillRect(ex + 1, ey, 5, 6);
+  ctx.fillStyle = '#111'; ctx.fillRect(ex - 5 + facing, ey + 1, 3, 4); ctx.fillRect(ex + 2 + facing, ey + 1, 3, 4);
+}
+
+// Dibujo provisional mientras no haya sprites. Devuelve la y de arriba del dibujo.
+function drawPlaceholder(p, v, artKey, isMe, cx) {
+  const w = CONFIG.PLAYER_W, h = v.h;
+  const outline = () => { ctx.strokeStyle = isMe ? '#fff' : 'rgba(0,0,0,.45)'; ctx.lineWidth = isMe ? 2.5 : 2; ctx.stroke(); };
+  if (artKey === 'gordash') {
+    const gw = w + 14, gh = h + 10, x = cx - gw / 2, y = v.y - gh;
+    ctx.save(); ctx.shadowColor = '#ffd23f'; ctx.shadowBlur = 16;
+    ctx.fillStyle = p.color; rr(x, y, gw, gh, 12); ctx.fill(); ctx.restore();
+    ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 3; rr(x, y, gw, gh, 12); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.3)';
+    ctx.beginPath(); ctx.ellipse(cx + v.facing * 3, y + gh * 0.66, gw * 0.4, gh * 0.27, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd23f';
+    ctx.beginPath(); ctx.moveTo(x + 6, y + 2); ctx.lineTo(x + 6, y - 9); ctx.lineTo(x + gw * 0.3, y - 3); ctx.lineTo(cx, y - 12);
+    ctx.lineTo(x + gw * 0.7, y - 3); ctx.lineTo(x + gw - 6, y - 9); ctx.lineTo(x + gw - 6, y + 2); ctx.fill();
+    drawEyes(cx, y + Math.min(11, gh * 0.3), v.facing);
+    return y - 12;
+  }
+  const rafa = artKey === 'rafael', bw = rafa ? w + 6 : w, x = cx - bw / 2, y = v.y - h;
+  ctx.fillStyle = p.color; rr(x, y, bw, h, rafa ? 11 : 6); ctx.fill(); outline();
+  if (rafa) {
+    ctx.fillStyle = 'rgba(255,255,255,.28)';
+    ctx.beginPath(); ctx.ellipse(cx + v.facing * 2, y + h * 0.66, bw * 0.36, h * 0.24, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  drawEyes(cx, y + Math.min(10, h * 0.3), v.facing);
+  if (v.flags & F.HOLDING) { ctx.fillStyle = p.color; ctx.fillRect(x - 4, y - 6, 5, 12); ctx.fillRect(x + bw - 1, y - 6, 5, 12); }
+  if (p.local && p.grabAnim > 0) { ctx.fillStyle = p.color; ctx.fillRect(v.facing > 0 ? x + bw : x - 16, y + h * 0.45, 16, 5); }
+  return y;
+}
+
+// Dibuja al personaje (sprite o provisional) desplazado dx. Devuelve la y de arriba.
+function drawFigure(p, v, isMe, dx) {
+  const artKey = (v.flags & F.GORDASH) ? 'gordash' : CHARACTERS[p.char].art;
+  const set = ART[artKey];
+  const img = set && set.states && (artImage(set.states[stateFor(p, v)]) || artImage(set.states.quieto));
+  if (!img) return drawPlaceholder(p, v, artKey, isMe, v.x + dx);
+  const dh = set.height, dw = img.naturalWidth * dh / img.naturalHeight;
+  ctx.save();
+  ctx.translate(v.x + dx, v.y);
+  if (v.facing < 0) ctx.scale(-1, 1);
+  ctx.drawImage(img, -dw / 2, -dh, dw, dh);
+  ctx.restore();
+  return v.y - dh;
+}
+
+function drawBubble(p, x, y) {
+  const b = G.bubbles.get(p.id);
+  if (!b || b.fx === 'gordash') return;
+  const labels = {
+    pray: ['🙏', '#fff'], 'burger-good': ['🍔 +' + Math.round((RAFAEL.BURGER_GOOD_MULT - 1) * 100) + '%', '#2ecc71'],
+    'burger-normal': ['🍔 =', '#fff'], 'burger-bad': ['🤢 −' + Math.round((1 - RAFAEL.BURGER_BAD_MULT) * 100) + '%', '#ff6b6b'],
+  };
+  const [text, color] = labels[b.fx] || ['', '#fff'];
+  ctx.globalAlpha = Math.min(1, b.t * 2);
+  const img = b.fx.startsWith('burger') && artImage(ART.images['hamburguesa_' + { good: 'buena', normal: 'normal', bad: 'mala' }[b.fx.slice(7)]]);
+  if (img) ctx.drawImage(img, x - 14, y - 30, 28, 28);
+  else {
+    ctx.font = 'bold 14px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.strokeText(text, x, y);
+    ctx.fillStyle = color; ctx.fillText(text, x, y);
+  }
+  ctx.globalAlpha = 1;
+}
+
 function drawPlayer(p, now, isMe) {
   const v = viewOf(p), f = v.flags, w = CONFIG.PLAYER_W, h = v.h;
   const x = v.x - w / 2, y = v.y - h;
   ctx.save();
   if (f & F.FINISHED) ctx.globalAlpha = 0.45;
   if (f & F.DASH) {
-    ctx.fillStyle = p.color;
-    for (let i = 1; i <= 3; i++) { ctx.globalAlpha = 0.18 * (4 - i); rr(x - v.facing * i * 12, y, w, h, 6); ctx.fill(); }
+    for (let i = 3; i >= 1; i--) { ctx.globalAlpha = 0.15 * (4 - i); drawFigure(p, v, false, -v.facing * i * 12); }
     ctx.globalAlpha = (f & F.FINISHED) ? 0.45 : 1;
   }
-  // cuerpo
-  ctx.fillStyle = p.color; rr(x, y, w, h, 6); ctx.fill();
-  ctx.strokeStyle = isMe ? '#fff' : 'rgba(0,0,0,.45)'; ctx.lineWidth = isMe ? 2.5 : 2; ctx.stroke();
-  // ojos
-  const ey = y + Math.min(10, h * 0.3), ex = v.x + v.facing * 4;
-  ctx.fillStyle = '#fff'; ctx.fillRect(ex - 6, ey, 5, 6); ctx.fillRect(ex + 1, ey, 5, 6);
-  ctx.fillStyle = '#111'; ctx.fillRect(ex - 5 + v.facing, ey + 1, 3, 4); ctx.fillRect(ex + 2 + v.facing, ey + 1, 3, 4);
-  // brazos arriba si lleva a alguien
-  if (f & F.HOLDING) { ctx.fillStyle = p.color; ctx.fillRect(x - 4, y - 6, 5, 12); ctx.fillRect(x + w - 1, y - 6, 5, 12); }
-  if (p.local && p.grabAnim > 0) { ctx.fillStyle = p.color; ctx.fillRect(v.facing > 0 ? x + w : x - 16, y + h * 0.45, 16, 5); }
+  const topY = drawFigure(p, v, isMe, 0);
   // estados
   if (f & F.FROZEN) {
     ctx.fillStyle = 'rgba(160,220,255,.6)'; rr(x - 3, y - 3, w + 6, h + 6, 6); ctx.fill();
@@ -1406,9 +1793,107 @@ function drawPlayer(p, now, isMe) {
   // nombre
   ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
   ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.6)';
-  const ny = y - ((f & F.HOLDING) ? CONFIG.CROUCH_H + 26 : 8) - ((f & F.STUN) ? 10 : 0);
-  ctx.strokeText(p.name, v.x, ny); ctx.fillStyle = isMe ? '#ffd23f' : '#fff'; ctx.fillText(p.name, v.x, ny);
+  const ny = topY - 8 - ((f & F.HOLDING) ? 50 : 0) - ((f & F.STUN) ? 10 : 0);
+  ctx.strokeText(p.name, v.x, ny); ctx.fillStyle = isMe ? '#ffd23f' : p.color; ctx.fillText(p.name, v.x, ny);
   if (isMe) { ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.moveTo(v.x - 5, ny - 16); ctx.lineTo(v.x + 5, ny - 16); ctx.lineTo(v.x, ny - 10); ctx.fill(); }
+  drawBubble(p, v.x, ny - (isMe ? 18 : 14));
+}
+
+// Familiares: aviso en el suelo, caída y persecución
+function drawMinions(now) {
+  const list = G.isHost ? (G.srv ? G.srv.minions : []) : [...G.minionView.values()];
+  const set = ART.familiar;
+  for (const m of list) {
+    if (!G.isHost) { m.rx += (m.x - m.rx) * 0.35; m.ry += (m.y - m.ry) * 0.35; }
+    const x = G.isHost ? m.x : m.rx, y = G.isHost ? m.y : m.ry;
+    if (m.phase === 0 || m.phase === 1) {
+      const k = m.phase === 0 ? 1 - Math.max(0, m.t) / RAFAEL.FAMILY_WARN : 1;
+      ctx.fillStyle = `rgba(231,76,60,${0.25 + 0.35 * k})`;
+      ctx.beginPath(); ctx.ellipse(m.x, m.gy - 2, 10 + 14 * k, 5 + 3 * k, 0, 0, Math.PI * 2); ctx.fill();
+      if (m.phase === 0) {
+        ctx.fillStyle = '#e74c3c'; ctx.font = 'bold 22px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText('!', m.x, m.gy - 12 - Math.abs(Math.sin(now / 80)) * 4);
+        continue;
+      }
+    }
+    const target = G.players.get(m.target != null ? m.target : -1);
+    const facing = target && viewOf(target).x < x ? -1 : 1;
+    const img = artImage(set.states[m.phase === 1 ? 'cayendo' : 'persiguiendo']) || artImage(set.states.cayendo) || artImage(set.states.persiguiendo);
+    if (img) {
+      const dh = set.height, dw = img.naturalWidth * dh / img.naturalHeight;
+      ctx.save(); ctx.translate(x, y); if (facing < 0) ctx.scale(-1, 1);
+      ctx.drawImage(img, -dw / 2, -dh, dw, dh); ctx.restore();
+      continue;
+    }
+    const owner = G.players.get(m.owner);
+    const w = RAFAEL.FAMILY_W, h = RAFAEL.FAMILY_H, bx = x - w / 2, by = y - h;
+    ctx.fillStyle = '#8d6e63'; rr(bx, by, w, h, 7); ctx.fill();
+    ctx.fillStyle = owner ? owner.color : '#fff'; ctx.fillRect(bx, by + 4, w, 4);
+    ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.lineWidth = 2; rr(bx, by, w, h, 7); ctx.stroke();
+    drawEyes(x, by + 10, facing);
+    if (m.phase === 1) { ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.beginPath(); ctx.moveTo(bx + 4, by - 6); ctx.lineTo(bx + 4, by - 22); ctx.moveTo(bx + w - 4, by - 6); ctx.lineTo(bx + w - 4, by - 22); ctx.stroke(); }
+  }
+}
+
+// Rayo de luz (rezar) o relámpago (rayos de Gordash) sobre un jugador
+function drawBeams() {
+  for (const b of G.beams) {
+    const p = G.players.get(b.v);
+    if (!p) continue;
+    const v = viewOf(p), a = Math.min(1, b.t / 0.25), top = G.camY - 10, bottom = v.y - v.h / 2;
+    if (b.kind === 'pray') {
+      const g = ctx.createLinearGradient(0, top, 0, v.y);
+      g.addColorStop(0, 'rgba(255,240,150,0)'); g.addColorStop(1, `rgba(255,230,120,${0.7 * a})`);
+      ctx.fillStyle = g; ctx.fillRect(v.x - 18, top, 36, v.y - top);
+      continue;
+    }
+    const img = artImage(ART.images.rayo);
+    if (img) {
+      const dh = bottom - top, dw = img.naturalWidth * dh / img.naturalHeight;
+      ctx.globalAlpha = a; ctx.drawImage(img, v.x - dw / 2, top, dw, dh); ctx.globalAlpha = 1;
+      continue;
+    }
+    for (const [lw, col] of [[7, `rgba(255,220,60,${a})`], [3, `rgba(255,255,255,${a})`]]) {
+      ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(v.x, top);
+      for (let i = 1; i <= 8; i++) ctx.lineTo(v.x + (i < 8 ? (i % 2 ? 14 : -14) : 0), top + (bottom - top) * i / 8);
+      ctx.stroke();
+    }
+  }
+}
+
+// Dios gordo: grande en la pantalla de los rivales, pequeño en la de quien lo lanza
+function drawFatGod(now) {
+  const W = CONFIG.VIEW_W, H = CONFIG.VIEW_H;
+  if (G.fatGodT > 0) drawGod(W / 2, H / 2 + 20, H * 0.42, Math.min(1, (G.fatGodTotal - G.fatGodT) * 5, G.fatGodT * 3), now);
+  if (G.fatGodMini > 0) drawGod(W - 60, 190, 36, Math.min(1, G.fatGodMini * 3), now);
+}
+
+function drawGod(cx, cy, r, a, now) {
+  ctx.save();
+  ctx.globalAlpha = a;
+  const img = artImage(ART.images.dios_gordo);
+  if (img) {
+    const dh = r * 2.3, dw = img.naturalWidth * dh / img.naturalHeight;
+    ctx.drawImage(img, cx - dw / 2, cy - dh / 2 + Math.sin(now / 300) * r * 0.03, dw, dh);
+  } else {
+    ctx.strokeStyle = '#ffe066'; ctx.lineWidth = r * 0.08;
+    ctx.beginPath(); ctx.ellipse(cx, cy - r * 1.08, r * 0.6, r * 0.15, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#f2c29b'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(231,76,60,.35)';
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(cx + s * r * 0.55, cy + r * 0.2, r * 0.18, 0, Math.PI * 2); ctx.fill(); }
+    ctx.fillStyle = '#222';
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(cx + s * r * 0.32, cy - r * 0.15, r * 0.09, 0, Math.PI * 2); ctx.fill(); }
+    ctx.strokeStyle = '#7a3b1e'; ctx.lineWidth = r * 0.06;
+    ctx.beginPath(); ctx.arc(cx, cy + r * 0.12, r * 0.4, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,.15)';
+    ctx.beginPath(); ctx.arc(cx, cy + r * 0.55, r * 0.5, 0.2 * Math.PI, 0.8 * Math.PI); ctx.stroke();
+    if (r > 80) {
+      ctx.font = `900 ${Math.round(r * 0.22)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = 6; ctx.strokeStyle = '#1a1a2e'; ctx.strokeText('DIOS GORDO', cx, cy - r * 0.55);
+      ctx.fillStyle = '#ffd23f'; ctx.fillText('DIOS GORDO', cx, cy - r * 0.55);
+    }
+  }
+  ctx.restore();
 }
 
 function updateCamera(dt) {
@@ -1500,19 +1985,44 @@ function drawHUD(now) {
 function drawAbilities(p) {
   const W = CONFIG.VIEW_W, H = CONFIG.VIEW_H, size = 58, gap = 10;
   const x0 = (W - (4 * size + 3 * gap)) / 2, y0 = H - size - 14;
-  p.abilities.forEach((a, i) => {
-    const x = x0 + i * (size + gap), cd = p.cooldowns[i];
+  const form = formOf(p);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 12px system-ui'; ctx.fillStyle = form ? '#ffd23f' : '#cfd8f0';
+  ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.6)';
+  const title = (form ? form.name : CHARACTERS[p.char].name).toUpperCase();
+  ctx.strokeText(title, W / 2, y0 - 10); ctx.fillText(title, W / 2, y0 - 10);
+  abilitiesOf(p).forEach((a, i) => {
+    const x = x0 + i * (size + gap), cx = x + size / 2, cd = p.cooldowns[i];
+    const empty = a.charges && p.charges[i] <= 0;
     ctx.fillStyle = 'rgba(20,24,44,.88)'; rr(x, y0, size, size, 10); ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = i === 3 ? '#f5c542' : '#8aa0c8'; ctx.stroke();
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    if (cd <= 0) { ctx.fillStyle = '#fff'; ctx.font = 'bold 22px system-ui'; ctx.fillText(a.key, x + size / 2, y0 + 22); }
-    ctx.fillStyle = '#8aa0c8'; ctx.font = '10px system-ui'; ctx.fillText(a.name, x + size / 2, y0 + 46);
-    if (cd > 0) {
+    ctx.lineWidth = 2; ctx.strokeStyle = (i === 3 || form) ? '#f5c542' : '#8aa0c8'; ctx.stroke();
+    const icon = artImage(ART.images[a.icon]);
+    if (icon) {
+      ctx.drawImage(icon, cx - 18, y0 + 4, 36, 36);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'left'; ctx.fillText(a.key, x + 5, y0 + 10); ctx.textAlign = 'center';
+    } else if (cd <= 0 && !empty && !a.passive) {
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 22px system-ui'; ctx.fillText(a.key, cx, y0 + 22);
+    }
+    ctx.fillStyle = '#8aa0c8'; ctx.font = '10px system-ui'; ctx.fillText(a.name, cx, y0 + 48);
+    if (a.passive && form) {
+      // hueco de la ulti durante la transformación: tiempo restante
+      ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(cx, y0 + 22, 15, -Math.PI / 2, -Math.PI / 2 + (p.formT / form.duration) * Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 14px system-ui'; ctx.fillText(Math.ceil(p.formT), cx, y0 + 22);
+    } else if (empty) {
+      ctx.fillStyle = 'rgba(0,0,0,.65)'; rr(x, y0, size, size, 10); ctx.fill();
+      ctx.fillStyle = '#8aa0c8'; ctx.font = 'bold 20px system-ui'; ctx.fillText('—', cx, y0 + 22);
+    } else if (cd > 0) {
+      const total = a.charges ? a.gap : a.cd;
       ctx.save(); rr(x, y0, size, size, 10); ctx.clip();
-      ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.beginPath(); ctx.moveTo(x + size / 2, y0 + size / 2);
-      ctx.arc(x + size / 2, y0 + size / 2, size, -Math.PI / 2, -Math.PI / 2 + (cd / a.cd) * Math.PI * 2); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.beginPath(); ctx.moveTo(cx, y0 + size / 2);
+      ctx.arc(cx, y0 + size / 2, size, -Math.PI / 2, -Math.PI / 2 + (cd / total) * Math.PI * 2); ctx.closePath(); ctx.fill();
       ctx.restore();
-      ctx.fillStyle = '#fff'; ctx.font = 'bold 20px system-ui'; ctx.fillText(Math.ceil(cd), x + size / 2, y0 + 22);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 20px system-ui'; ctx.fillText(Math.ceil(cd), cx, y0 + 22);
+    }
+    if (a.charges) {
+      ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.arc(x + size - 6, y0 + 6, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#1a1a2e'; ctx.font = 'bold 12px system-ui'; ctx.fillText(p.charges[i], x + size - 6, y0 + 7);
     }
   });
 }
@@ -1526,10 +2036,11 @@ function drawStatus(p) {
   else if (p.freezeT > 0) { text = '¡Congelado!'; color = '#8fd8ff'; }
   else if (p.stunT > 0) { text = 'Aturdido'; color = '#ffd23f'; }
   else if (p.holding != null) { text = 'J: ¡LANZAR!'; color = '#2ecc71'; }
+  else if (p.slowT > 0) { text = 'Ralentizado'; color = '#b46cff'; }
   if (!text) return;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = 'bold 18px system-ui';
   ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.7)';
-  ctx.strokeText(text, W / 2, H - 96); ctx.fillStyle = color; ctx.fillText(text, W / 2, H - 96);
+  ctx.strokeText(text, W / 2, H - 110); ctx.fillStyle = color; ctx.fillText(text, W / 2, H - 110);
 }
 
 function render(now, dt) {
@@ -1543,12 +2054,15 @@ function render(now, dt) {
   drawTiles();
   drawCheckpointsAndFinish(me);
   drawEnemies(now);
+  drawMinions(now);
   drawProjectiles(now);
   for (const p of G.players.values()) if (p !== me) drawPlayer(p, now, false);
   if (me) drawPlayer(me, now, true);
   for (const f of G.fx) { ctx.globalAlpha = Math.min(1, f.life * 2); ctx.fillStyle = f.color; ctx.fillRect(f.x - 2, f.y - 2, 4, 4); }
   ctx.globalAlpha = 1;
+  drawBeams();
   ctx.restore();
+  drawFatGod(now);
   drawHUD(now);
 }
 
@@ -1579,6 +2093,35 @@ function buildColorPicker() {
   }
 }
 
+function setMyChar(c) {
+  G.myChar = validChar(c);
+  try { localStorage.setItem('fatrace-char', G.myChar); } catch (e) { /* sin almacenamiento */ }
+  if (G.mode === 'lobby' && G.net) {
+    const entry = G.lobby.find(p => p.id === G.myId);
+    if (G.isHost && entry) { entry.char = G.myChar; hostBroadcastLobby(); }
+    else if (!G.isHost) G.net.sendToHost({ t: 'pick', char: G.myChar });
+  }
+  renderCharPickers();
+}
+
+function renderCharPickers() {
+  const entry = G.mode === 'lobby' && G.lobby.find(p => p.id === G.myId);
+  const current = entry ? entry.char : G.myChar;
+  for (const id of ['charPickMenu', 'charPickLobby']) {
+    const box = $(id);
+    box.innerHTML = '';
+    for (const [key, ch] of Object.entries(CHARACTERS)) {
+      const card = document.createElement('div');
+      card.className = 'char' + (key === current ? ' sel' : '');
+      const b = document.createElement('b'); b.textContent = ch.name;
+      const s = document.createElement('span'); s.textContent = ch.desc;
+      card.append(b, s);
+      card.onclick = () => setMyChar(key);
+      box.appendChild(card);
+    }
+  }
+}
+
 function showLobby() {
   showPanel('lobby');
   $('lobbyCode').textContent = G.code || '----';
@@ -1594,10 +2137,11 @@ function renderLobby() {
     const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = p.color;
     const name = document.createElement('span'); name.textContent = p.name;
     const tag = document.createElement('span'); tag.className = 'tag';
-    tag.textContent = [p.id === 0 ? 'anfitrión' : '', p.id === G.myId ? 'tú' : ''].filter(Boolean).join(' · ');
+    tag.textContent = [CHARACTERS[validChar(p.char)].name, p.id === 0 ? 'anfitrión' : '', p.id === G.myId ? 'tú' : ''].filter(Boolean).join(' · ');
     li.append(dot, name, tag);
     ul.appendChild(li);
   }
+  renderCharPickers();
   if (!G.lobby.length) {
     const li = document.createElement('li'); li.textContent = 'Esperando jugadores…'; ul.appendChild(li);
   }
@@ -1632,8 +2176,10 @@ function initUI() {
     $('nameInput').value = localStorage.getItem('fatrace-name') || '';
     const c = localStorage.getItem('fatrace-color');
     if (COLORS.includes(c)) G.myColor = c;
+    G.myChar = validChar(localStorage.getItem('fatrace-char'));
   } catch (e) { /* sin almacenamiento */ }
   buildColorPicker();
+  renderCharPickers();
   $('btnHost').onclick = startHosting;
   $('btnJoin').onclick = joinRoom;
   $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom(); });
