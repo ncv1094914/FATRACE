@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>FAT RACE</title>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
@@ -47,11 +47,50 @@
   .char b { display: block; color: #fff; }
   .char span { font-size: 12px; color: #8aa0c8; }
   #btnMusic { position: fixed; top: 12px; right: 12px; width: auto; padding: 8px 12px; font-size: 20px; line-height: 1; background: #2c3766; }
+  /* Controles táctiles: solo en celular/tablet (body.touch) y durante la carrera (body.playing) */
+  html { touch-action: manipulation; }
+  #game { touch-action: none; }
+  #touch { position: fixed; inset: 0; z-index: 5; display: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; --u: 60px; }
+  body.touch.playing #touch { display: block; }
+  #stick { position: absolute; width: calc(2.4 * var(--u)); height: calc(2.4 * var(--u)); margin: calc(-1.2 * var(--u)) 0 0 calc(-1.2 * var(--u));
+           border-radius: 50%; background: rgba(14,18,36,.35); border: 3px solid rgba(255,255,255,.4); pointer-events: none; }
+  #stick.idle { opacity: .45; }
+  #stick.run { border-color: #ffd23f; }
+  #stick i { position: absolute; left: 50%; top: 50%; width: var(--u); height: var(--u); margin: calc(-.5 * var(--u)) 0 0 calc(-.5 * var(--u)); border-radius: 50%; background: rgba(255,255,255,.55); }
+  #stick.run i { background: rgba(255,210,63,.85); }
+  .tbtn { position: absolute; width: calc(var(--s) * var(--u)); height: calc(var(--s) * var(--u));
+          right: calc(var(--r) * var(--u) + env(safe-area-inset-right)); bottom: calc(var(--b) * var(--u) + env(safe-area-inset-bottom));
+          display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid rgba(255,255,255,.45);
+          background: rgba(20,24,44,.55) center 40% / 62% no-repeat; color: #fff; font-weight: 800; font-size: calc(.38 * var(--u)); text-shadow: 0 1px 3px #000; }
+  .tbtn.txt { font-size: calc(.2 * var(--u)); }
+  .tbtn.icon { align-items: flex-end; padding-bottom: 4%; font-size: calc(.22 * var(--u)); }
+  .tbtn.ulti { border-color: #f5c542; }
+  .tbtn.on { background-color: rgba(255,210,63,.5); border-color: #ffd23f; }
+  .tbtn.off { background-color: rgba(0,0,0,.7); border-color: rgba(255,255,255,.25); color: #cfd8f0; }
+  #rotate { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; padding: 16px;
+            background: #0d1020; color: #ffd23f; font-size: 22px; font-weight: 800; text-align: center; }
+  #rotate span { display: block; font-size: 64px; margin-bottom: 12px; }
+  @media (orientation: portrait) { body.touch.playing #rotate { display: flex; } }
+  #btnFull { position: fixed; top: 12px; left: 12px; width: auto; padding: 8px 12px; font-size: 14px; background: #2c3766; color: #eef; }
 </style>
 </head>
 <body>
 <canvas id="game" width="960" height="540"></canvas>
 <button id="btnMusic" class="hidden" title="Música on/off">🔊</button>
+<button id="btnFull" class="hidden">⛶ Pantalla completa</button>
+
+<!-- Controles táctiles: --r/--b = distancia al borde derecho/inferior y --s = tamaño, en "u" (se ajusta a la pantalla).
+     Agarrar y las habilidades 1-3 forman un arco alrededor de SALTAR; la ultimate va por fuera. -->
+<div id="touch">
+  <div id="stick" class="idle"><i></i></div>
+  <div class="tbtn txt" data-a="space jump" style="--s:1.6; --r:.3; --b:.3">SALTAR</div>
+  <div class="tbtn txt" data-a="grab" style="--s:1.1; --r:2.85; --b:.55">AGARRAR</div>
+  <div class="tbtn" data-a="ab0" style="--s:1; --r:2.59; --b:1.75">1</div>
+  <div class="tbtn" data-a="ab1" style="--s:1; --r:1.75; --b:2.59">2</div>
+  <div class="tbtn" data-a="ab2" style="--s:1; --r:.6; --b:2.9">3</div>
+  <div class="tbtn ulti" data-a="ab3" style="--s:1.2; --r:2.9; --b:2.9">4</div>
+</div>
+<div id="rotate"><div><span>📱↻</span>Gira el celular para jugar</div></div>
 
 <div id="menu" class="panel">
   <h1>FAT RACE</h1>
@@ -733,7 +772,7 @@ const CONTROLS = [
 const KEYS = {};       // acción -> { codes, label }
 const KEYMAP = {};     // lo que lee el juego (saltar = arriba o espacio)
 const GAME_KEYS = new Set();
-const keyName = a => KEYS[a].label;
+const keyName = a => Touch.on ? TOUCH_LABELS[a] : KEYS[a].label;
 
 function applyKeys() {
   for (const [a] of CONTROLS) KEYMAP[a] = KEYS[a].codes;
@@ -795,13 +834,140 @@ const Input = {
     addEventListener('keyup', e => this.down.delete(e.code));
     addEventListener('blur', () => { this.down.clear(); this.pressed.clear(); });
   },
-  endStep() { this.pressed.clear(); },
+  endStep() { this.pressed.clear(); Touch.pressed.clear(); },
 };
 
-// Control por teclado (jugador humano local)
+// Control por teclado o pantalla táctil (jugador humano local)
 const KeyCtrl = {
-  down: a => KEYMAP[a].some(k => Input.down.has(k)),
-  pressed: a => KEYMAP[a].some(k => Input.pressed.has(k)),
+  down: a => KEYMAP[a].some(k => Input.down.has(k)) || Touch.down.has(a),
+  pressed: a => KEYMAP[a].some(k => Input.pressed.has(k)) || Touch.pressed.has(a),
+};
+
+// Controles táctiles (celular/tablet): joystick a la izquierda y botones a la derecha.
+// Escriben acciones, no teclas, así que el juego no distingue de dónde vienen.
+// Se encienden al tocar la pantalla y se apagan al pulsar una tecla del juego.
+// Joystick: a medias = andar, a tope = correr; arriba = escaleras/avión (saltar es el botón).
+const TOUCH_LABELS = { left: '◄', right: '►', up: '▲', down: '▼', space: 'SALTAR', run: 'joystick a tope',
+                       grab: 'AGARRAR', ab0: '1', ab1: '2', ab2: '3', ab3: '4' };
+const Touch = {
+  on: false, down: new Set(), pressed: new Set(),
+  stick: null,     // { id, ox, oy }: el dedo del joystick y el centro de la base
+  stickActs: [],
+  btns: [], u: 60,
+  init() {
+    const layer = $('touch');
+    this.btns = [...layer.querySelectorAll('.tbtn')].map(el => ({ el, acts: el.dataset.a.split(' '), id: null, txt: el.textContent, icon: '' }));
+    layer.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      const b = this.btns.find(b => b.el === e.target.closest('.tbtn'));
+      if (b) {
+        if (b.id != null) return;
+        b.id = e.pointerId; b.el.classList.add('on');
+        for (const a of b.acts) this.press(a);
+      } else if (!this.stick && e.clientX < innerWidth / 2) {
+        this.stick = { id: e.pointerId, ox: e.clientX, oy: e.clientY };
+        this.moveStick(e.clientX, e.clientY);
+      } else return;
+      try { layer.setPointerCapture(e.pointerId); } catch (err) { /* el dedo ya se levantó */ }
+    });
+    layer.addEventListener('pointermove', e => { if (this.stick && e.pointerId === this.stick.id) this.moveStick(e.clientX, e.clientY); });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) layer.addEventListener(ev, e => this.lift(e.pointerId));
+    layer.addEventListener('contextmenu', e => e.preventDefault());
+    addEventListener('touchstart', () => this.setOn(true), { capture: true, passive: true });
+    addEventListener('keydown', e => { if (GAME_KEYS.has(e.code) && !(e.target && e.target.tagName === 'INPUT')) this.setOn(false); });
+    addEventListener('blur', () => this.release());
+    addEventListener('resize', () => this.layout());
+    document.addEventListener('fullscreenchange', () => this.syncUI());
+    $('btnFull').onclick = () => this.fullscreen();
+    this.setOn(matchMedia('(pointer: coarse)').matches);
+    this.layout();
+  },
+  press(a) { if (!this.down.has(a)) this.pressed.add(a); this.down.add(a); },
+  setStick(acts) {
+    for (const a of this.stickActs) if (!acts.includes(a)) this.down.delete(a);
+    for (const a of acts) this.press(a);
+    this.stickActs = acts;
+  },
+  moveStick(x, y) {
+    const s = this.stick, R = 1.2 * this.u;
+    let dx = x - s.ox, dy = y - s.oy;
+    const d = Math.hypot(dx, dy);
+    // la base sigue al dedo: así cambiar de lado es rápido (machacar para escaparse de un agarre)
+    if (d > R) { dx *= R / d; dy *= R / d; s.ox = x - dx; s.oy = y - dy; }
+    const nx = dx / R, ny = dy / R, acts = [];
+    if (nx < -0.25) acts.push('left');
+    if (nx > 0.25) acts.push('right');
+    if (ny < -0.55) acts.push('up');
+    if (ny > 0.55) acts.push('down');
+    if (Math.hypot(nx, ny) > 0.9 && Math.abs(nx) > 0.4) acts.push('run');
+    this.setStick(acts);
+    this.drawStick(s.ox, s.oy, dx, dy, acts.includes('run'));
+  },
+  drawStick(ox, oy, dx, dy, run) {
+    const el = $('stick');
+    el.style.left = ox + 'px'; el.style.top = oy + 'px';
+    el.firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+    el.classList.toggle('run', run);
+    el.classList.toggle('idle', !this.stick);
+  },
+  stickHome() { this.drawStick(1.7 * this.u, innerHeight - 1.7 * this.u, 0, 0, false); },
+  lift(id) {
+    if (this.stick && this.stick.id === id) { this.stick = null; this.setStick([]); this.stickHome(); return; }
+    for (const b of this.btns) if (b.id === id) {
+      b.id = null; b.el.classList.remove('on');
+      for (const a of b.acts) this.down.delete(a);
+    }
+  },
+  release() {
+    this.stick = null; this.stickActs = []; this.down.clear(); this.pressed.clear();
+    for (const b of this.btns) { b.id = null; b.el.classList.remove('on'); }
+    this.stickHome();
+  },
+  setOn(v) {
+    if (this.on === v) return;
+    this.on = v;
+    document.body.classList.toggle('touch', v);
+    this.release(); this.syncUI();
+  },
+  layout() {
+    this.u = Math.round(Math.min(innerHeight * 0.13, innerWidth * 0.12, 72));
+    $('touch').style.setProperty('--u', this.u + 'px');
+    if (!this.stick) this.stickHome();
+  },
+  syncUI() {
+    const playing = document.body.classList.contains('playing');
+    $('btnFull').classList.toggle('hidden', !this.on || playing || !document.fullscreenEnabled || !!document.fullscreenElement);
+  },
+  // Pantalla completa y en horizontal (los navegadores solo lo dejan tras un toque; el iPhone no lo permite)
+  fullscreen() {
+    const el = document.documentElement;
+    if (!this.on || !el.requestFullscreen || document.fullscreenElement) return;
+    el.requestFullscreen({ navigationUI: 'hide' })
+      .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'))
+      .catch(() => { /* no se puede: se juega igual */ });
+  },
+  // Iconos y tiempos de recarga de las habilidades en los botones
+  update() {
+    if (!this.on || !document.body.classList.contains('playing')) return;
+    const me = G.players.get(G.myId);
+    if (!me) return;
+    const abs = abilitiesOf(me);
+    for (const b of this.btns) {
+      const m = /^ab(\d)$/.exec(b.acts[0]), a = m && abs[+m[1]];
+      if (!a) continue;
+      const i = +m[1], shown = (a.shows && a.shows(me)) || a, cd = me.cooldowns[i];
+      const empty = a.charges && me.charges[i] <= 0;
+      const icon = ART.images[shown.icon] || '';
+      const txt = cd > 0 ? String(Math.ceil(cd)) : empty ? '—' : TOUCH_LABELS[b.acts[0]];
+      if (icon !== b.icon) {
+        b.icon = icon;
+        b.el.style.backgroundImage = icon ? `url("${icon}")` : '';
+        b.el.classList.toggle('icon', !!icon);
+      }
+      if (txt !== b.txt) b.el.textContent = b.txt = txt;
+      b.el.classList.toggle('off', !!(a.passive || cd > 0 || empty));
+    }
+  },
 };
 
 // Muñeco de práctica: sigue al jugador para poder probar agarres y habilidades
@@ -2894,6 +3060,7 @@ function frame(now) {
   while (acc >= CONFIG.STEP) { fixedStep(CONFIG.STEP); acc -= CONFIG.STEP; }
   netStep(dt);
   render(now, dt);
+  Touch.update();
   requestAnimationFrame(frame);
 }
 
@@ -3763,13 +3930,16 @@ function drawHUD(now) {
   if (G.offline || G.raceTime < 8) {
     ctx.textAlign = 'left'; ctx.font = '12px system-ui'; ctx.fillStyle = 'rgba(14,18,36,.75)';
     const k = keyName;
-    const help = [`${k('left')}/${k('right')} mover · ${k('up')}/${k('space')} saltar · ${k('down')} agacharse`,
-                  `${k('run')} correr · ${k('grab')} agarrar/lanzar · ${[0, 1, 2, 3].map(i => k('ab' + i)).join(' ')} habilidades`];
+    const help = Touch.on
+      ? ['Joystick: mover · a tope: correr · ▼ agacharse · ▲ escaleras',
+         'SALTAR · AGARRAR (otra vez = lanzar) · 1 2 3 4 habilidades']
+      : [`${k('left')}/${k('right')} mover · ${k('up')}/${k('space')} saltar · ${k('down')} agacharse`,
+         `${k('run')} correr · ${k('grab')} agarrar/lanzar · ${[0, 1, 2, 3].map(i => k('ab' + i)).join(' ')} habilidades`];
     const tw = Math.max(...help.map(l => ctx.measureText(l).width));
     rr(10, H - 46, tw + 16, 38, 6); ctx.fill(); ctx.fillStyle = '#cfd8f0';
     help.forEach((l, i) => ctx.fillText(l, 18, H - 36 + i * 17));
   }
-  if (G.offline) drawKeyTester(10, 72);
+  if (G.offline && !Touch.on) drawKeyTester(10, 72);
 
   // cuenta atrás
   let big = null;
@@ -3889,7 +4059,7 @@ function drawStatus(p) {
   else if (p.drunkT > 0) { text = '¡Borracho! Controles invertidos'; color = '#ff8fa3'; }
   else if (p.smokeT > 0) { text = '¡Ahumado! No ves nada'; color = '#ddd'; }
   else if (p.avionT > 0) { text = `AVIÓN · ${keyName('left')}/${keyName('right')} dirección · ${keyName('up')}/${keyName('down')} subir y bajar · ${keyName('ab3')}: ¡soltar la NUKE!`; color = '#ff5a4f'; }
-  else if (stolenAbility(p)) { text = '🔫 Y: usar «' + stolenAbility(p).name + '» (robada, ' + Math.ceil(p.stolen.t) + ' s)'; color = '#ff8fa3'; }
+  else if (stolenAbility(p)) { text = '🔫 ' + keyName('ab0') + ': usar «' + stolenAbility(p).name + '» (robada, ' + Math.ceil(p.stolen.t) + ' s)'; color = '#ff8fa3'; }
   else if (p.form === 'marciano') { text = '👽 MARCIANO · más rápido, salta más y recarga el doble'; color = '#7dff7a'; }
   else if (p.slowT > 0) { text = 'Ralentizado'; color = '#b46cff'; }
   if (!text) return;
@@ -3940,6 +4110,8 @@ const $ = id => document.getElementById(id);
 
 function showPanel(id) {
   for (const p of ['menu', 'lobby', 'results']) $(p).classList.toggle('hidden', p !== id);
+  document.body.classList.toggle('playing', !id);
+  Touch.release(); Touch.syncUI();
   Musica.update();
 }
 
@@ -4033,7 +4205,7 @@ function renderKeys() {
   for (const [a, , , desc] of CONTROLS) {
     const tr = document.createElement('tr'), td = document.createElement('td'), b = document.createElement('button');
     b.className = 'key' + (rebinding === a ? ' wait' : '');
-    b.textContent = rebinding === a ? 'Pulsa…' : keyName(a);
+    b.textContent = rebinding === a ? 'Pulsa…' : KEYS[a].label;
     b.onclick = () => { rebinding = rebinding === a ? null : a; renderKeys(); };
     const d = document.createElement('td'); d.textContent = desc;
     td.appendChild(b); tr.append(td, d); table.appendChild(tr);
@@ -4111,10 +4283,10 @@ function initUI() {
   renderCharPickers();
   renderKeys();
   $('btnResetKeys').onclick = () => { rebinding = null; resetKeys(); saveKeys(); renderKeys(); };
-  $('btnHost').onclick = startHosting;
-  $('btnJoin').onclick = joinRoom;
+  $('btnHost').onclick = () => { Touch.fullscreen(); startHosting(); };
+  $('btnJoin').onclick = () => { Touch.fullscreen(); joinRoom(); };
   $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom(); });
-  $('btnPractice').onclick = startPractice;
+  $('btnPractice').onclick = () => { Touch.fullscreen(); startPractice(); };
   $('btnStart').onclick = hostStart;
   $('btnLeave').onclick = () => leaveToMenu('');
   $('btnBackLobby').onclick = () => { G.net.broadcast({ t: 'toLobby' }); hostBroadcastLobby(); };
@@ -4124,6 +4296,7 @@ function initUI() {
 }
 
 Input.init();
+Touch.init();
 initUI();
 addEventListener('resize', resize);
 resize();
