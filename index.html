@@ -38,6 +38,8 @@
   table.keys { width: 100%; border-collapse: collapse; margin-top: 6px; }
   table.keys td { padding: 3px 6px; border-bottom: 1px solid #1f2850; }
   table.keys td:first-child { font-weight: 700; color: #ffd23f; white-space: nowrap; }
+  button.key { width: auto; min-width: 72px; padding: 4px 8px; background: #2c3766; color: #ffd23f; }
+  button.key.wait { background: #ffd23f; color: #1a1a2e; }
   .stack > * + * { margin-top: 8px; }
   .chars { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 12px; }
   .char { flex: 1 1 30%; padding: 10px; border-radius: 10px; background: #1a2142; border: 2px solid #2c3766; cursor: pointer; text-align: left; }
@@ -67,17 +69,11 @@
   <button id="btnPractice" class="alt">Práctica (sin red)</button>
   <p id="menuMsg" class="msg"></p>
   <details>
-    <summary>Controles</summary>
-    <table class="keys">
-      <tr><td>A / D</td><td>Moverse</td></tr>
-      <tr><td>W / Espacio</td><td>Saltar (mantén para saltar más alto)</td></tr>
-      <tr><td>W / S</td><td>Subir / bajar escaleras (Espacio o A/D para soltarte)</td></tr>
-      <tr><td>S</td><td>Agacharse · corriendo = deslizarse · en plataforma fina = bajar</td></tr>
-      <tr><td>Shift</td><td>Correr</td></tr>
-      <tr><td>E</td><td>Agarrar a otro jugador · otra vez = lanzarlo</td></tr>
-      <tr><td>A / D rápido</td><td>Escaparte si te agarran</td></tr>
-      <tr><td>Y U I O</td><td>Habilidades: débil · media · fuerte · ultimate</td></tr>
-    </table>
+    <summary>Controles (puedes cambiarlos)</summary>
+    <table id="keysTable" class="keys"></table>
+    <p class="muted">Pulsa una tecla de la lista y luego la nueva (Esc cancela). Se guardan en este navegador.
+      Si alguna no responde junto con otras, compruébalo con el probador de teclas de Práctica.</p>
+    <button id="btnResetKeys" class="alt">Restablecer teclas</button>
   </details>
 </div>
 
@@ -719,12 +715,72 @@ function isOneWay(map, tx, ty) {
 // =====================================================================
 // 3. INPUT
 // =====================================================================
-const KEYMAP = {
-  left: ['KeyA'], right: ['KeyD'], up: ['KeyW'], down: ['KeyS'],
-  jump: ['KeyW', 'Space'], space: ['Space'], run: ['ShiftLeft', 'ShiftRight'],
-  grab: ['KeyE'], ab0: ['KeyY'], ab1: ['KeyU'], ab2: ['KeyI'], ab3: ['KeyO'],
-};
-const GAME_KEYS = new Set(Object.values(KEYMAP).flat());
+// Teclas que cada jugador puede cambiar en el menú (Controles): [acción, códigos, texto, para qué sirve].
+// Se guardan en el navegador, así cada uno elige las que su teclado detecta a la vez.
+const CONTROLS = [
+  ['left', ['KeyA'], 'A', 'Izquierda · machaca izquierda/derecha para escaparte si te agarran'],
+  ['right', ['KeyD'], 'D', 'Derecha'],
+  ['up', ['KeyW'], 'W', 'Saltar (mantén para saltar más alto) · subir escaleras'],
+  ['space', ['Space'], 'Espacio', 'Saltar también · soltarte de una escalera'],
+  ['down', ['KeyS'], 'S', 'Agacharse · corriendo = deslizarse · en plataforma fina = bajar'],
+  ['run', ['ShiftLeft', 'ShiftRight'], 'Shift', 'Correr'],
+  ['grab', ['KeyE'], 'E', 'Agarrar a otro jugador · otra vez = lanzarlo'],
+  ['ab0', ['KeyY'], 'Y', 'Habilidad débil'],
+  ['ab1', ['KeyU'], 'U', 'Habilidad media'],
+  ['ab2', ['KeyI'], 'I', 'Habilidad fuerte'],
+  ['ab3', ['KeyO'], 'O', 'Ultimate'],
+];
+const KEYS = {};       // acción -> { codes, label }
+const KEYMAP = {};     // lo que lee el juego (saltar = arriba o espacio)
+const GAME_KEYS = new Set();
+const keyName = a => KEYS[a].label;
+
+function applyKeys() {
+  for (const [a] of CONTROLS) KEYMAP[a] = KEYS[a].codes;
+  KEYMAP.jump = [...KEYS.up.codes, ...KEYS.space.codes];
+  GAME_KEYS.clear();
+  for (const c of Object.values(KEYMAP).flat()) GAME_KEYS.add(c);
+}
+
+function resetKeys() {
+  for (const [a, codes, label] of CONTROLS) KEYS[a] = { codes, label };
+  applyKeys();
+}
+
+// Si la tecla ya era de otra acción, las dos se intercambian
+function setKey(a, code, label) {
+  const other = CONTROLS.map(c => c[0]).find(b => b !== a && KEYS[b].codes.includes(code));
+  if (other) KEYS[other] = KEYS[a];
+  KEYS[a] = { codes: [code], label };
+  applyKeys();
+}
+
+function saveKeys() {
+  try { localStorage.setItem('fatrace-teclas', JSON.stringify(KEYS)); } catch (e) { /* sin almacenamiento */ }
+}
+
+function loadKeys() {
+  resetKeys();
+  try {
+    const saved = JSON.parse(localStorage.getItem('fatrace-teclas') || '{}');
+    for (const [a] of CONTROLS) {
+      const k = saved[a];
+      if (k && Array.isArray(k.codes) && k.codes.length && k.codes.every(c => typeof c === 'string') && typeof k.label === 'string')
+        KEYS[a] = { codes: k.codes.slice(0, 2), label: k.label.slice(0, 12) };
+    }
+    applyKeys();
+  } catch (e) { resetKeys(); }
+}
+
+// Texto de una tecla para el menú y el HUD (e.key respeta la distribución del teclado: la Ñ sale como Ñ)
+function keyLabel(e) {
+  const names = { ' ': 'Espacio', Control: 'Ctrl', AltGraph: 'AltGr', Backspace: 'Borrar', CapsLock: 'Bloq Mayús',
+                  ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓' };
+  if (names[e.key]) return names[e.key];
+  if (e.key.length === 1) return e.key.toUpperCase();
+  return e.key === 'Dead' || e.key === 'Unidentified' ? e.code.replace(/^Key|^Digit/, '') : e.key;
+}
+loadKeys();
 
 const Input = {
   down: new Set(), pressed: new Set(),
@@ -732,7 +788,8 @@ const Input = {
     addEventListener('keydown', e => {
       if (e.target && e.target.tagName === 'INPUT') return;
       if (GAME_KEYS.has(e.code)) e.preventDefault();
-      if (!e.repeat && !this.down.has(e.code)) this.pressed.add(e.code);
+      // solo e.repeat: si el teclado se come un keyup, la tecla no se queda "pegada" sin poder volver a pulsarla
+      if (!e.repeat) this.pressed.add(e.code);
       this.down.add(e.code);
     });
     addEventListener('keyup', e => this.down.delete(e.code));
@@ -3705,11 +3762,14 @@ function drawHUD(now) {
   if (me) { drawAbilities(me); drawStatus(me); if (me.char === 'yago') drawLuck(me); }
   if (G.offline || G.raceTime < 8) {
     ctx.textAlign = 'left'; ctx.font = '12px system-ui'; ctx.fillStyle = 'rgba(14,18,36,.75)';
-    const help = ['A/D mover · W/Espacio saltar · S agacharse', 'Shift correr · E agarrar/lanzar · Y U I O habilidades'];
+    const k = keyName;
+    const help = [`${k('left')}/${k('right')} mover · ${k('up')}/${k('space')} saltar · ${k('down')} agacharse`,
+                  `${k('run')} correr · ${k('grab')} agarrar/lanzar · ${[0, 1, 2, 3].map(i => k('ab' + i)).join(' ')} habilidades`];
     const tw = Math.max(...help.map(l => ctx.measureText(l).width));
     rr(10, H - 46, tw + 16, 38, 6); ctx.fill(); ctx.fillStyle = '#cfd8f0';
     help.forEach((l, i) => ctx.fillText(l, 18, H - 36 + i * 17));
   }
+  if (G.offline) drawKeyTester(10, 72);
 
   // cuenta atrás
   let big = null;
@@ -3720,6 +3780,30 @@ function drawHUD(now) {
     ctx.lineWidth = 8; ctx.strokeStyle = '#1a1a2e'; ctx.strokeText(big, W / 2, H / 2 - 20);
     ctx.fillStyle = '#ffd23f'; ctx.fillText(big, W / 2, H / 2 - 20);
   }
+}
+
+// Probador de teclas (Práctica): se encienden las que recibe el juego. Si pulsas una y no se
+// enciende, el teclado no la detecta junto con las demás (ghosting) y el juego nunca se entera.
+const TESTER_ROWS = [['left', 'right', 'up', 'space', 'down', 'run'], ['grab', 'ab0', 'ab1', 'ab2', 'ab3']];
+
+function drawKeyTester(x, y) {
+  const h = 19, pad = 8, gap = 4, n = [...Input.down].filter(c => GAME_KEYS.has(c)).length;
+  ctx.font = 'bold 11px system-ui';
+  const widths = TESTER_ROWS.map(r => r.map(a => Math.max(h, ctx.measureText(keyName(a)).width + 10)));
+  const w = Math.max(150, ...widths.map(r => r.reduce((s, v) => s + v + gap, -gap)));
+  ctx.fillStyle = 'rgba(14,18,36,.75)'; rr(x, y, w + 2 * pad, 2 * (h + gap) + 28, 6); ctx.fill();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = '12px system-ui'; ctx.fillStyle = '#cfd8f0';
+  ctx.fillText('Teclas que recibe el juego: ' + n, x + pad, y + 13);
+  ctx.textAlign = 'center'; ctx.font = 'bold 11px system-ui';
+  TESTER_ROWS.forEach((row, r) => {
+    let kx = x + pad;
+    row.forEach((a, i) => {
+      const on = KEYMAP[a].some(c => Input.down.has(c)), ky = y + 26 + r * (h + gap), kw = widths[r][i];
+      ctx.fillStyle = on ? '#2ecc71' : '#2a3150'; rr(kx, ky, kw, h, 4); ctx.fill();
+      ctx.fillStyle = on ? '#0e1224' : '#8aa0c8'; ctx.fillText(keyName(a), kx + kw / 2, ky + h / 2 + 1);
+      kx += kw + gap;
+    });
+  });
 }
 
 function drawAbilities(p) {
@@ -3740,9 +3824,9 @@ function drawAbilities(p) {
     const icon = artImage(ART.images[shown.icon]);
     if (icon) {
       ctx.drawImage(icon, cx - 18, y0 + 4, 36, 36);
-      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'left'; ctx.fillText(a.key, x + 5, y0 + 10); ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'left'; ctx.fillText(keyName('ab' + i), x + 5, y0 + 10); ctx.textAlign = 'center';
     } else if (cd <= 0 && !empty && !a.passive) {
-      ctx.fillStyle = '#fff'; ctx.font = 'bold 22px system-ui'; ctx.fillText(a.key, cx, y0 + 22);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 22px system-ui'; ctx.fillText(keyName('ab' + i), cx, y0 + 22);
     }
     ctx.fillStyle = shown !== a ? '#ff8fa3' : '#8aa0c8'; ctx.font = '10px system-ui'; ctx.fillText(shown.name, cx, y0 + 48);
     // tiempo restante de la transformación o de una habilidad en curso (el avión)
@@ -3792,19 +3876,19 @@ function drawStatus(p) {
   const fin = G.finishInfo.get(p.id);
   if (p.finished) { text = fin ? `¡META! ${fin.place}º · ${fmtTime(fin.time)} · esperando al resto…` : '¡META!'; color = '#ffd23f'; }
   else if (p.deadT > 0) { text = '💀 ¡La nuke te ha matado! Vuelves al checkpoint…'; color = '#ff5a4f'; }
-  else if (p.grabbedBy != null) { text = `¡Te han agarrado! Machaca A/D (${Math.min(p.mash, CONFIG.GRAB_ESCAPE_PRESSES)}/${CONFIG.GRAB_ESCAPE_PRESSES})`; color = '#ff8a80'; }
+  else if (p.grabbedBy != null) { text = `¡Te han agarrado! Machaca ${keyName('left')}/${keyName('right')} (${Math.min(p.mash, CONFIG.GRAB_ESCAPE_PRESSES)}/${CONFIG.GRAB_ESCAPE_PRESSES})`; color = '#ff8a80'; }
   else if (p.freezeT > 0) { text = '¡Congelado!'; color = '#8fd8ff'; }
   else if (p.stunT > 0) { text = 'Aturdido'; color = '#ffd23f'; }
   else if (p.thinkT > 0) { text = '🤔 «' + p.thinkText + '»'; color = '#fffdf3'; }
   else if (p.abductT > 0) { text = '🛸 ¡Te abduce un ovni!'; color = '#7dff7a'; }
   else if (p.selfieT > 0) { text = '📸 ¡Selfie!'; color = '#ff8fd0'; }
-  else if (p.holding != null) { text = 'E: ¡LANZAR!'; color = '#2ecc71'; }
+  else if (p.holding != null) { text = keyName('grab') + ': ¡LANZAR!'; color = '#2ecc71'; }
   else if (p.poemT > 0) { text = '📜 «' + p.poemText + '» · la realidad se distorsiona…'; color = '#c89bff'; }
   else if (p.lagT > 0) { text = 'L A G . . .'; color = '#39ff88'; }
   else if (p.invertT > 0) { text = '¡Virus! Controles invertidos'; color = '#39ff88'; }
   else if (p.drunkT > 0) { text = '¡Borracho! Controles invertidos'; color = '#ff8fa3'; }
   else if (p.smokeT > 0) { text = '¡Ahumado! No ves nada'; color = '#ddd'; }
-  else if (p.avionT > 0) { text = 'AVIÓN · A/D dirección · W/S subir y bajar · O: ¡soltar la NUKE!'; color = '#ff5a4f'; }
+  else if (p.avionT > 0) { text = `AVIÓN · ${keyName('left')}/${keyName('right')} dirección · ${keyName('up')}/${keyName('down')} subir y bajar · ${keyName('ab3')}: ¡soltar la NUKE!`; color = '#ff5a4f'; }
   else if (stolenAbility(p)) { text = '🔫 Y: usar «' + stolenAbility(p).name + '» (robada, ' + Math.ceil(p.stolen.t) + ' s)'; color = '#ff8fa3'; }
   else if (p.form === 'marciano') { text = '👽 MARCIANO · más rápido, salta más y recarga el doble'; color = '#7dff7a'; }
   else if (p.slowT > 0) { text = 'Ralentizado'; color = '#b46cff'; }
@@ -3940,6 +4024,33 @@ function renderCharPickers() {
   }
 }
 
+// ---------- Cambiar teclas (menú > Controles) ----------
+let rebinding = null;   // acción que espera su tecla nueva
+
+function renderKeys() {
+  const table = $('keysTable');
+  table.innerHTML = '';
+  for (const [a, , , desc] of CONTROLS) {
+    const tr = document.createElement('tr'), td = document.createElement('td'), b = document.createElement('button');
+    b.className = 'key' + (rebinding === a ? ' wait' : '');
+    b.textContent = rebinding === a ? 'Pulsa…' : keyName(a);
+    b.onclick = () => { rebinding = rebinding === a ? null : a; renderKeys(); };
+    const d = document.createElement('td'); d.textContent = desc;
+    td.appendChild(b); tr.append(td, d); table.appendChild(tr);
+  }
+}
+
+// En la fase de captura, antes que el juego: la tecla elegida no cuenta como pulsada
+addEventListener('keydown', e => {
+  if (!rebinding) return;
+  if ($('menu').classList.contains('hidden')) { rebinding = null; return; }   // se fue a jugar sin elegir
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (e.repeat) return;
+  if (e.code !== 'Escape') { setKey(rebinding, e.code, keyLabel(e)); saveKeys(); }
+  rebinding = null;
+  renderKeys();
+}, true);
+
 function showLobby() {
   showPanel('lobby');
   $('lobbyCode').textContent = G.code || '----';
@@ -3998,6 +4109,8 @@ function initUI() {
   } catch (e) { /* sin almacenamiento */ }
   buildColorPicker();
   renderCharPickers();
+  renderKeys();
+  $('btnResetKeys').onclick = () => { rebinding = null; resetKeys(); saveKeys(); renderKeys(); };
   $('btnHost').onclick = startHosting;
   $('btnJoin').onclick = joinRoom;
   $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom(); });
