@@ -3,12 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>FAT RACE</title>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1020; color: #eef; font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
-  #game { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: block; background: #5ec8f2; }
+  #game { position: fixed; left: 0; top: 0; display: block; background: #5ec8f2; }
   .panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;
            background: rgba(14, 18, 36, .93); border: 2px solid #2c3766; border-radius: 16px; padding: 22px; box-shadow: 0 10px 40px rgba(0,0,0,.5); text-align: center; }
   .hidden { display: none !important; }
@@ -46,11 +49,18 @@
   .char.sel { border-color: #ffd23f; }
   .char b { display: block; color: #fff; }
   .char span { font-size: 12px; color: #8aa0c8; }
+  .char.ro { cursor: default; }
+  button.mini { width: auto; padding: 2px 8px; margin-left: 4px; background: #2c3766; color: #eef; font-size: 13px; }
+  .char.ro:not(.sel) { opacity: .55; }
+  select { width: 100%; font: inherit; padding: 9px; border-radius: 10px; border: 2px solid #2c3766; background: #0d1020; color: #fff; }
   #btnMusic { position: fixed; top: 12px; right: 12px; width: auto; padding: 8px 12px; font-size: 20px; line-height: 1; background: #2c3766; }
   /* Controles táctiles: solo en celular/tablet (body.touch) y durante la carrera (body.playing) */
   html { touch-action: manipulation; }
-  #game { touch-action: none; }
-  #touch { position: fixed; inset: 0; z-index: 5; display: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; --u: 60px; }
+  #game { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  /* mide la zona visible: alto sin las barras del navegador y las muescas (ver viewBox) */
+  #safeProbe { position: fixed; left: 0; top: 0; width: 0; height: 100vh; height: 100svh; visibility: hidden; pointer-events: none;
+               padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  #touch { position: fixed; left: 0; top: 0; width: 100%; height: 100%; z-index: 5; display: none; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; --u: 60px; }
   body.touch.playing #touch { display: block; }
   #stick { position: absolute; width: calc(2.4 * var(--u)); height: calc(2.4 * var(--u)); margin: calc(-1.2 * var(--u)) 0 0 calc(-1.2 * var(--u));
            border-radius: 50%; background: rgba(14,18,36,.35); border: 3px solid rgba(255,255,255,.4); pointer-events: none; }
@@ -59,7 +69,7 @@
   #stick i { position: absolute; left: 50%; top: 50%; width: var(--u); height: var(--u); margin: calc(-.5 * var(--u)) 0 0 calc(-.5 * var(--u)); border-radius: 50%; background: rgba(255,255,255,.55); }
   #stick.run i { background: rgba(255,210,63,.85); }
   .tbtn { position: absolute; width: calc(var(--s) * var(--u)); height: calc(var(--s) * var(--u));
-          right: calc(var(--r) * var(--u) + env(safe-area-inset-right)); bottom: calc(var(--b) * var(--u) + env(safe-area-inset-bottom));
+          right: calc(var(--r) * var(--u)); bottom: calc(var(--b) * var(--u));
           display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid rgba(255,255,255,.45);
           background: rgba(20,24,44,.55) center 40% / 62% no-repeat; color: #fff; font-weight: 800; font-size: calc(.38 * var(--u)); text-shadow: 0 1px 3px #000; }
   .tbtn.txt { font-size: calc(.2 * var(--u)); }
@@ -76,7 +86,7 @@
 </head>
 <body>
 <canvas id="game" width="960" height="540"></canvas>
-<button id="btnMusic" class="hidden" title="Música on/off">🔊</button>
+<button id="btnMusic" class="hidden" title="Sonido on/off (en la carrera, tecla M)">🔊</button>
 <button id="btnFull" class="hidden">⛶ Pantalla completa</button>
 
 <!-- Controles táctiles: --r/--b = distancia al borde derecho/inferior y --s = tamaño, en "u" (se ajusta a la pantalla).
@@ -90,6 +100,7 @@
   <div class="tbtn" data-a="ab2" style="--s:1; --r:.6; --b:2.9">3</div>
   <div class="tbtn ulti" data-a="ab3" style="--s:1.2; --r:2.9; --b:2.9">4</div>
 </div>
+<div id="safeProbe"></div>
 <div id="rotate"><div><span>📱↻</span>Gira el celular para jugar</div></div>
 
 <div id="menu" class="panel">
@@ -105,7 +116,12 @@
     <input id="codeInput" maxlength="4" placeholder="CÓDIGO">
     <button id="btnJoin">Unirse</button>
   </div>
-  <button id="btnPractice" class="alt">Práctica (sin red)</button>
+  <div class="row">
+    <button id="btnPractice" class="alt">Práctica (sin red)</button>
+    <select id="mapSelect" title="Mapa de la práctica"></select>
+  </div>
+  <button id="btnBots" class="alt">🤖 Carrera contra bots (sin red)</button>
+  <p id="iosHint" class="muted hidden">En iPhone se juega mejor a pantalla completa: Compartir → «Añadir a pantalla de inicio» y ábrelo desde ese icono.</p>
   <p id="menuMsg" class="msg"></p>
   <details>
     <summary>Controles (puedes cambiarlos)</summary>
@@ -120,9 +136,13 @@
   <p class="muted">Código de sala</p>
   <div id="lobbyCode" class="code">----</div>
   <p id="lobbyRole" class="muted"></p>
+  <label>Mapa <span id="mapWho"></span></label>
+  <div id="mapPick" class="chars"></div>
+  <label>Personaje</label>
   <div id="charPickLobby" class="chars"></div>
   <ul id="lobbyList" class="list"></ul>
   <div class="stack">
+    <button id="btnAddBot" class="alt">🤖 Añadir bot</button>
     <button id="btnStart">Empezar carrera</button>
     <p id="lobbyWait" class="muted">Esperando a que el anfitrión empiece…</p>
     <button id="btnLeave" class="alt">Salir</button>
@@ -447,6 +467,11 @@ const CONFIG = {
   ENEMY_W: 28, ENEMY_H: 24, ENEMY_RANGE: 80, ENEMY_OMEGA: 0.75,
   STUN_TIME: 1, STUN_IMMUNE: 1.6, STUN_KNOCK_X: 320, STUN_KNOCK_Y: -360, STOMP_BOUNCE: -520,
   DEAD_TIME: 1.5,          // muerto en el suelo antes de volver al checkpoint (nuke de Mirko)
+  HIT_STOP: 0.06,          // al recibir un golpe, tu personaje se queda clavado este instante (sensación de impacto)
+
+  // Casillas especiales de los mapas (las puertas tienen su ritmo en cada mapa: MAPS.<mapa>.door)
+  TRAMPOLINE_VEL: 1250,                              // T: toldo que rebota, lanza unas 11 casillas hacia arriba
+  SPIKE_STUN: 0.8, SPIKE_KX: 280, SPIKE_KY: -620,    // A: pinchos, aturden y lanzan hacia atrás y arriba
 
   // Salida: una plataforma fina por jugador, apiladas en el cielo contra la pared izquierda (en casillas)
   SPAWN_PLAT_W: 2, SPAWN_COL_GAP: 1, SPAWN_HEIGHT: 2, SPAWN_ROW_GAP: 3, SPAWN_TOP: 4,
@@ -676,17 +701,567 @@ const SEGMENTS = {
     '############',
     '############',
   ],
+
+  // ---- Dos alturas (mapas de 17 filas): piso de arriba en la fila 9 (6 casillas sobre el suelo,
+  //      pasarelas finas que se atraviesan saltando desde abajo) y escalones a media altura en la
+  //      fila 12. Las rutas se separan en un x_subida_* y se juntan en x_bajada (o en un embudo o
+  //      una puerta). Arriba hay tantas trampas como abajo: pinchos, enemigos, muros, techos bajos y huecos ----
+  x_subida_bloques: [
+    '........................',
+    '..................AA....',
+    '............------------',
+    '........................',
+    '........................',
+    '.......===..............',
+    '........................',
+    '.C...........E....AA....',
+    '########################',
+    '########################',
+  ],
+  x_subida_escalera: [
+    '........................',
+    '..........E......AAA....',
+    '.....H------------------',
+    '.....H..................',
+    '.....H..................',
+    '.....H..................',
+    '.....H..................',
+    '.C...H.....AA......E....',
+    '########################',
+    '########################',
+  ],
+  // el toldo sube al piso de arriba (quien no quiera, lo salta); arriba, un muro y pinchos
+  x_toldo_subida: [
+    '...............==.......',
+    '...............==...AA..',
+    '..........--------------',
+    '........................',
+    '........................',
+    '........................',
+    '........................',
+    '.C...........E.....AA...',
+    '####TT##################',
+    '########################',
+  ],
+  // arriba: un conserje, dos huecos (caes al piso de abajo) y una chincheta; abajo: pinchos, un muro y otro conserje
+  x_alto_huecos: [
+    '........................',
+    '....E...........A.......',
+    '---------....-------....',
+    '........................',
+    '........................',
+    '..........---...........',
+    '........##..............',
+    '..AAA...##....E.....AA..',
+    '########################',
+    '########################',
+  ],
+  // abajo, un foso de 5 casillas (solo se salta corriendo); arriba, un techo bajo (agachado: debajo
+  // el suelo es macizo, porque en una pasarela fina la S te deja caer), un conserje y pinchos
+  x_foso: [
+    '...======...............',
+    '..............E.....AA..',
+    '--========--------------',
+    '........................',
+    '........................',
+    '..........---...........',
+    '........................',
+    '..E.....................',
+    '#######.....############',
+    '#######.....############',
+  ],
+  // abajo, túnel agachado; arriba, por encima del bloque, con pinchos y un conserje
+  x_tunel: [
+    '........................',
+    '........................',
+    '------....AAA..E....----',
+    '......#############.....',
+    '......#############.....',
+    '......#############.....',
+    '......#############.....',
+    '........................',
+    '########################',
+    '########################',
+  ],
+  x_bajada: [
+    '........................',
+    '.....AA.................',
+    '----------..............',
+    '........................',
+    '........................',
+    '...............===......',
+    '........................',
+    '.....E..................',
+    '########################',
+    '########################',
+  ],
+  // punto de reunión sin puerta: un pilar hasta arriba con un solo paso por debajo
+  embudo: [
+    ...Array(12).fill('......####......'),
+    '................',
+    '................',
+    '..C.............',
+    '################',
+    '################',
+  ],
+
+  // ---- Para los mapas difíciles. D = puerta que se abre y se cierra sola,
+  //      A = pinchos (aturden y lanzan hacia atrás), T = toldo que rebota ----
+  // Puerta bajo un pilar que llega hasta arriba del mapa: no se puede saltar por encima,
+  // así que quien llega pronto espera y el grupo se vuelve a juntar
+  puerta: [
+    '......####......', '......####......', '......####......', '......####......',
+    '......####......', '......####......', '......####......', '......####......',
+    '......####......', '......####......', '......####......', '......####......',
+    '.......D........',
+    '.......D........',
+    '..C....D........',
+    '################',
+    '################',
+  ],
+  a_conserjes: [
+    '........................',
+    '.......===......===.....',
+    '........................',
+    '.....E.......E......E...',
+    '########################',
+    '########################',
+  ],
+  a_chinchetas: [
+    '........................',
+    '....AAAA..==..AAAAA.....',
+    '########################',
+    '########################',
+  ],
+  // taquillas en escalera; al bajar corriendo se cae en las chinchetas (hay que saltar)
+  a_taquillas: [
+    '........................',
+    '........................',
+    '...........######.......',
+    '...........######.......',
+    '...........######.......',
+    '.......##########.......',
+    '.......##########...AA..',
+    '########################',
+    '########################',
+  ],
+  // mesas del comedor sobre un suelo de chinchetas
+  a_comedor: [
+    '........................',
+    '..........-----.........',
+    '........................',
+    '...-----........-----...',
+    '..AAAAAAAAAAAAAAAAAAA...',
+    '########################',
+    '########################',
+  ],
+  // tres caminos: escalera lenta y segura, saltando al bloque, o por abajo esquivando las chinchetas
+  a_escalera: [
+    '....H===============....',
+    '....H...................',
+    '....H...................',
+    '....H...................',
+    '....H...................',
+    '....H...................',
+    '....H...................',
+    '....H......====.........',
+    '....H...................',
+    '.C..H.AAAAA.....AAAA....',
+    '########################',
+    '########################',
+  ],
+  a_pupitres: [
+    '........................',
+    '........................',
+    '.......##.......###.....',
+    '..E....##...E...###...E.',
+    '########################',
+    '########################',
+  ],
+  // las mismas trampas del pasillo con un piso de arriba que también tiene las suyas
+  a2_chinchetas: [
+    '........................',
+    '......E..........AA.....',
+    '----------....----------',
+    '........................',
+    '........................',
+    '........................',
+    '........................',
+    '....AAAA..==..AAAAA.....',
+    '########################',
+    '########################',
+  ],
+  // desde arriba se baja por el agujero a la mesa alta; desde la mesa alta se sube
+  a2_comedor: [
+    '........................',
+    '....E..............AA...',
+    '---------.......--------',
+    '........................',
+    '..........-----.........',
+    '........................',
+    '...-----........-----...',
+    '..AAAAAAAAAAAAAAAAAAA...',
+    '########################',
+    '########################',
+  ],
+  a2_pupitres: [
+    '........................',
+    '....E....AA...........=.',
+    '---------------.....----',
+    '........................',
+    '........................',
+    '...........---..........',
+    '.......##.......###.....',
+    '..E....##...E...###...E.',
+    '########################',
+    '########################',
+  ],
+  a_sprint: [
+    '........................',
+    '........................',
+    '...........###..........',
+    '.....E.....###.....E....',
+    '########################',
+    '########################',
+  ],
+  b_tejados: [
+    '........................',
+    '........................',
+    '........................',
+    '..............######....',
+    '..............######....',
+    '......######..######....',
+    '......######..######....',
+    '......######..######....',
+    '####..######..######..##',
+    '####..######..######..##',
+  ],
+  b_antenas: [
+    '........................',
+    '.........---............',
+    '........................',
+    '.C.AA.....E...AAA...AA..',
+    '########################',
+    '########################',
+  ],
+  // edificio de 8 casillas: solo se sube rebotando en el toldo
+  b_toldo: [
+    '.............########...', '.............########...', '.............########...', '.............########...',
+    '.............########...', '.............########...', '.............########...', '.............########...',
+    '#########TT#############',
+    '########################',
+  ],
+  b_palomas: [
+    '........................',
+    '........................',
+    '........................',
+    '........................',
+    '.......#####.....#####..',
+    '.C.....#####.....#####..',
+    '#####..#####.....#####..',
+    '#####..#####.....#####..',
+  ],
+  // antenas abajo; arriba, una pasarela (se sube desde la cornisa) con una paloma y antenas
+  b2_antenas: [
+    '........................',
+    '..............E..AA.....',
+    '.........-----------....',
+    '........................',
+    '........................',
+    '.........---............',
+    '........................',
+    '.C.AA.....E...AAA...AA..',
+    '########################',
+    '########################',
+  ],
+  // edificio de 8 casillas con tres caminos: rebotar en el toldo, la escalera de incendios
+  // o arrastrarse agachado por el hueco de debajo. En el tejado, una paloma
+  b2_toldo: [
+    '................E.......',
+    '............H########...', '............H########...', '............H########...', '............H########...',
+    '............H########...', '............H########...', '............H########...',
+    '............H...........',
+    '#########TT#############',
+    '########################',
+  ],
+  // el hueco grande se salta corriendo o se cruza por el cable de arriba (con antenas en medio)
+  b2_palomas: [
+    '.............AA.........',
+    '..........--------......',
+    '........................',
+    '........................',
+    '.......#####.....#####..',
+    '.C.....#####.....#####..',
+    '#####..#####.....#####..',
+    '#####..#####.....#####..',
+  ],
+  // salto de fe con el toldo (corriendo llegas al tejado) o, más lento, por la cornisa y la escalera
+  b2_salto: [
+    '............H###########', '............H###########', '............H###########',
+    '............H###########', '............H###########', '.........A..H###########',
+    '.......-----H###########',
+    '####TT......############',
+    '######......############',
+  ],
+  // cornisas estrechas sobre el vacío
+  b_cornisas: [
+    '........................',
+    '........................',
+    '........................',
+    '............----........',
+    '........................',
+    '......---........---....',
+    '........................',
+    '........................',
+    '###..................###',
+    '###..................###',
+  ],
+  // salto de fe: el toldo lanza por encima del hueco, pero solo llega quien va corriendo
+  b_salto: [
+    '.............###########', '.............###########', '.............###########', '.............###########',
+    '.............###########', '.............###########', '.............###########',
+    '####TT.......###########',
+    '######.......###########',
+  ],
+  // torre: escalera (lenta, todos en fila) o plataformas en zigzag
+  c_subida: [
+    '........................',
+    '........................',
+    '........................',
+    '..................C.....',
+    '..........----.H########',
+    '...............H########',
+    '...............H########',
+    '....----.......H########',
+    '...............H########',
+    '...............H########',
+    '..........----.H########',
+    '...............H########',
+    '...............H########',
+    '....----.......H########',
+    '...............H########',
+    '...............H########',
+    '..........----.H########',
+    '...............H########',
+    '...............H########',
+    '....----.......H########',
+    '...............H########',
+    '...............H########',
+    '########################',
+    '########################',
+  ],
+  // pasarelas en lo alto: caerse es volver al checkpoint
+  c_cima: [
+    '...................E....',
+    '#####...#####...########',
+    '#####...#####...########',
+    ...Array(18).fill('........................'),
+  ],
+  c_puerta_alta: [
+    '......####......',
+    '.......D........',
+    '.......D........',
+    '..C....D........',
+    '################',
+    '################',
+    ...Array(18).fill('................'),
+  ],
+  // bajada a saltos: quien se queda corto cae al vacío
+  c_bajada: [
+    '........................',
+    '#####...................',
+    '#####...................',
+    '........................',
+    '........................',
+    '........######..........',
+    '........######..........',
+    '........................',
+    '........................',
+    '...............######...',
+    '...............######...',
+    ...Array(8).fill('........................'),
+    '.....................###',
+    '.....................###',
+  ],
+  // escalones flotantes hacia arriba y bajada a saltos desde media altura (abajo, el vacío)
+  c_escalones: [
+    ...Array(10).fill('........................'),
+    '......................##',
+    '......................##',
+    '........................',
+    '.................----...',
+    '........................',
+    '........................',
+    '...........----.........',
+    '........................',
+    '........................',
+    '.....----...............',
+    '........................',
+    '........................',
+    '####....................',
+    '####....................',
+  ],
+  c_bajada_media: [
+    ...Array(10).fill('........................'),
+    '####....................',
+    '####....................',
+    '........................',
+    '........................',
+    '.......#####............',
+    '.......#####............',
+    '........................',
+    '........................',
+    '...............#####....',
+    '...............#####....',
+    '........................',
+    '........................',
+    '....................####',
+    '....................####',
+  ],
+  // torre con tres caminos: escalera hasta arriba, zigzag con pinchos hasta arriba o, a media
+  // altura, el pasillo que atraviesa la torre (con un enemigo; lleva a la ruta de en medio)
+  c2_subida: [
+    '........................',
+    '........................',
+    '........................',
+    '..................C.....',
+    '..........----.H########',
+    '...............H########',
+    '...............H########',
+    '....----.......H########',
+    '...............H########',
+    '...........A...H########',
+    '..........----.H........',
+    '...............H........',
+    '...............H....E...',
+    '....----.......H########',
+    '...............H########',
+    '...........A...H########',
+    '..........----.H########',
+    '...............H########',
+    '...............H########',
+    '....----.......H########',
+    '...............H########',
+    '...............H########',
+    '########################',
+    '########################',
+  ],
+  // arriba, pasarelas con huecos, una chincheta y un enemigo; en medio, un piso con un enemigo y
+  // pinchos que acaba en una escalera para volver arriba (quien se cae de arriba, cae aquí)
+  c2_cima: [
+    '........................',
+    '........................',
+    '........................',
+    '..........A........E....',
+    '#####...#####...######H#',
+    '#####...#####...######H#',
+    ...Array(6).fill('......................H#'),
+    '........E.....AA......H#',
+    '########################',
+    ...Array(10).fill('........................'),
+  ],
+  // bajada a saltos por las cornisas (con pinchos) o, más lento, por la escalera hasta el patio
+  c2_bajada: [
+    '........................',
+    '........................',
+    '........................',
+    '........................',
+    '#####H..................',
+    '#####H..................',
+    '.....H..................',
+    '.....H......AA..........',
+    '.....H..######..........',
+    '.....H..######..........',
+    '.....H..................',
+    '.....H..................',
+    '.....H.........######...',
+    '.....H.........######...',
+    ...Array(7).fill('.....H..................'),
+    '.....H....AAA.....AAA...',
+    '...#####################',
+    '...#####################',
+  ],
+  // escalones flotantes con pinchos (arriba) o el suelo con pinchos y un enemigo (abajo)
+  c2_escalones: [
+    ...Array(10).fill('........................'),
+    '......................##',
+    '......................##',
+    '...................A....',
+    '.................----...',
+    '........................',
+    '.............A..........',
+    '...........----.........',
+    '........................',
+    '........................',
+    '.....----...............',
+    '........................',
+    '.........AAA.....E......',
+    '########################',
+    '########################',
+  ],
+  c2_bajada_media: [
+    ...Array(10).fill('........................'),
+    '####....................',
+    '####....................',
+    '........................',
+    '..........A.............',
+    '.......#####............',
+    '.......#####............',
+    '........................',
+    '..................A.....',
+    '...............#####....',
+    '...............#####....',
+    '........................',
+    '..E......AAAA...........',
+    '########################',
+    '########################',
+  ],
+  c_patio: [
+    '........................',
+    '.......===......===.....',
+    '........................',
+    '..C..E.......E......E...',
+    '########################',
+    '########################',
+  ],
 };
 
+// tema: colores de las casillas y fondo dibujado (si no hay "fondo" con dibujo). door: ritmo de sus puertas (s)
 const MAPS = {
   prueba: {
-    name: 'Pista de prueba',
+    name: 'Pista de prueba', desc: 'La de siempre, para aprender. ★',
     fondo: 'colegio',      // clave de ART.fondos
     rows: 17,
-    segments: ['inicio', 'huecos', 'pared', 'enemigos', 'tunel', 'huecos', 'escalera', 'finas', 'piedras',
-               'enemigos', 'pared', 'tunel', 'muro', 'finas', 'piedras', 'escalera', 'muro', 'final', 'fin'],
+    segments: ['inicio', 'huecos', 'pared', 'enemigos', 'tunel', 'huecos', 'escalera', 'finas',
+               'x_subida_bloques', 'x_alto_huecos', 'x_foso', 'x_bajada', 'embudo', 'x_subida_escalera', 'x_tunel',
+               'x_bajada', 'enemigos', 'x_toldo_subida', 'x_foso', 'x_bajada', 'final', 'fin'],
+  },
+  pasillos: {
+    name: 'Pasillos del colegio', desc: 'Puertas que se cierran, chinchetas y conserjes. ★★★',
+    tema: 'pasillo', rows: 17, door: { cycle: 6, open: 2.4 },
+    segments: ['inicio', 'x_subida_bloques', 'a2_chinchetas', 'x_bajada', 'puerta',
+               'x_subida_escalera', 'a2_comedor', 'x_bajada', 'embudo',
+               'x_toldo_subida', 'x_tunel', 'a2_pupitres', 'x_bajada', 'puerta',
+               'a_escalera', 'x_subida_bloques', 'x_alto_huecos', 'x_bajada', 'puerta', 'a_sprint', 'final', 'fin'],
+  },
+  azotea: {
+    name: 'Azotea al atardecer', desc: 'Tejados, toldos que rebotan y saltos al vacío. ★★★★',
+    tema: 'atardecer', rows: 17, door: { cycle: 7, open: 2.8 },
+    segments: ['inicio', 'b_tejados', 'b2_antenas', 'b2_toldo', 'puerta', 'b2_palomas', 'b_cornisas', 'b2_salto', 'b2_antenas',
+               'b_tejados', 'puerta', 'b_cornisas', 'b2_toldo', 'b2_palomas', 'b2_salto', 'b2_antenas', 'puerta', 'b_tejados',
+               'b_cornisas', 'final', 'fin'],
+  },
+  torre: {
+    name: 'La torre del reloj', desc: 'Sube, cruza por las alturas y baja sin caerte. ★★★★',
+    tema: 'noche', rows: 24, door: { cycle: 7, open: 2.8 },
+    segments: ['inicio', 'a_conserjes', 'c2_subida', 'c2_cima', 'c_puerta_alta', 'c2_cima', 'c2_bajada', 'c_patio', 'puerta',
+               'a_pupitres', 'c2_escalones', 'c2_bajada_media', 'a_chinchetas', 'c2_subida', 'c2_cima', 'c_puerta_alta', 'c2_bajada',
+               'c_patio', 'a_sprint', 'final', 'fin'],
   },
 };
+const MAP_RANDOM = 'azar';   // en la sala: "al azar" entre todos los mapas
+const validMap = k => Object.prototype.hasOwnProperty.call(MAPS, k) ? k : 'prueba';
+const lobbyMapKey = k => k === MAP_RANDOM ? k : validMap(k);
 
 function buildMap(def) {
   const lines = Array.from({ length: def.rows }, () => '');
@@ -701,6 +1276,11 @@ function buildMap(def) {
   }
   const map = parseMap(lines);
   map.fondo = def.fondo || null;
+  map.tema = def.tema || 'colegio';
+  map.door = def.door || null;
+  map.spikes = map.tiles.includes('A');
+  map.tramps = map.tiles.includes('T');
+  map.doorCols = [...new Set(map.tiles.map((c, i) => c === 'D' ? i % map.W : -1).filter(x => x >= 0))];
   return map;
 }
 
@@ -742,9 +1322,22 @@ function addSpawnPlatforms(map, n) {
 function tileAt(map, tx, ty) {
   if (tx < 0 || tx >= map.W) return '#';          // bordes laterales = pared
   if (ty < 0 || ty >= map.H) return '.';          // arriba y abajo = vacío
-  return map.tiles[ty * map.W + tx];
+  const c = map.tiles[ty * map.W + tx];
+  return c === 'D' && doorOpen(map) ? 'd' : c;    // puerta abierta = 'd' (se pasa)
 }
-const isSolid = c => c === '#' || c === '=';
+const isSolid = c => c === '#' || c === '=' || c === 'D' || c === 'T';
+
+// Puertas (D): todas las del mapa se abren y se cierran a la vez con el reloj de la carrera.
+// Como los enemigos, no se sincronizan: cada máquina lo calcula igual.
+function doorOpen(map) {
+  const d = map.door;
+  return !d || G.raceTime % d.cycle < d.open;
+}
+// Segundos que le quedan a la puerta en su estado actual (para el aviso de que se va a cerrar)
+function doorLeft(map) {
+  const d = map.door, ph = G.raceTime % d.cycle;
+  return ph < d.open ? d.open - ph : d.cycle - ph;
+}
 // Plataforma fina o parte de arriba de una escalera: solo se pisa desde arriba
 function isOneWay(map, tx, ty) {
   const c = tileAt(map, tx, ty);
@@ -853,7 +1446,7 @@ const Touch = {
   on: false, down: new Set(), pressed: new Set(),
   stick: null,     // { id, ox, oy }: el dedo del joystick y el centro de la base
   stickActs: [],
-  btns: [], u: 60,
+  btns: [], u: 60, box: { x: 0, y: 0, w: 0, h: 0 },
   init() {
     const layer = $('touch');
     this.btns = [...layer.querySelectorAll('.tbtn')].map(el => ({ el, acts: el.dataset.a.split(' '), id: null, txt: el.textContent, icon: '' }));
@@ -873,10 +1466,13 @@ const Touch = {
     layer.addEventListener('pointermove', e => { if (this.stick && e.pointerId === this.stick.id) this.moveStick(e.clientX, e.clientY); });
     for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) layer.addEventListener(ev, e => this.lift(e.pointerId));
     layer.addEventListener('contextmenu', e => e.preventDefault());
+    // iOS ignora user-scalable=no: se bloquea a mano el zoom con dos dedos (y el de los toques en la carrera)
+    layer.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+    for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, e => e.preventDefault());
+    document.addEventListener('touchmove', e => { if (e.touches.length > 1 || (e.scale && e.scale !== 1)) e.preventDefault(); }, { passive: false });
     addEventListener('touchstart', () => this.setOn(true), { capture: true, passive: true });
     addEventListener('keydown', e => { if (GAME_KEYS.has(e.code) && !(e.target && e.target.tagName === 'INPUT')) this.setOn(false); });
     addEventListener('blur', () => this.release());
-    addEventListener('resize', () => this.layout());
     document.addEventListener('fullscreenchange', () => this.syncUI());
     $('btnFull').onclick = () => this.fullscreen();
     this.setOn(matchMedia('(pointer: coarse)').matches);
@@ -905,12 +1501,12 @@ const Touch = {
   },
   drawStick(ox, oy, dx, dy, run) {
     const el = $('stick');
-    el.style.left = ox + 'px'; el.style.top = oy + 'px';
+    el.style.left = ox - this.box.x + 'px'; el.style.top = oy - this.box.y + 'px';
     el.firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
     el.classList.toggle('run', run);
     el.classList.toggle('idle', !this.stick);
   },
-  stickHome() { this.drawStick(1.7 * this.u, innerHeight - 1.7 * this.u, 0, 0, false); },
+  stickHome() { const b = this.box; this.drawStick(b.x + 1.7 * this.u, b.y + b.h - 1.7 * this.u, 0, 0, false); },
   lift(id) {
     if (this.stick && this.stick.id === id) { this.stick = null; this.setStick([]); this.stickHome(); return; }
     for (const b of this.btns) if (b.id === id) {
@@ -930,8 +1526,10 @@ const Touch = {
     this.release(); this.syncUI();
   },
   layout() {
-    this.u = Math.round(Math.min(innerHeight * 0.13, innerWidth * 0.12, 72));
-    $('touch').style.setProperty('--u', this.u + 'px');
+    const b = this.box = viewBox(), st = $('touch').style;
+    st.left = b.x + 'px'; st.top = b.y + 'px'; st.width = b.w + 'px'; st.height = b.h + 'px';
+    this.u = Math.round(Math.min(b.h * 0.13, b.w * 0.12, 72));
+    st.setProperty('--u', this.u + 'px');
     if (!this.stick) this.stickHome();
   },
   syncUI() {
@@ -1002,6 +1600,228 @@ class BotCtrl {
   }
 }
 
+// ---------- Bots de la sala ----------
+// Juegan solos (los mueve el anfitrión, como a su propio jugador): corren hacia la meta saltando
+// paredes, huecos, pinchos y enemigos, suben escaleras, van agachados por los túneles, esperan en
+// las puertas, se escapan de los agarres y usan las habilidades de su personaje cuando les sirven.
+const BOT_NAMES = ['Tuerca', 'Chispa', 'Bip-Bop', 'Píxel', 'Tornillo', 'Circuito'];
+
+// Cuándo le sirve a un bot cada habilidad (por su nombre). r = rivales que ve: { v, dx, dy, d }
+const aheadOf = (p, r, range, h) => r.some(x => x.dx * p.facing > 0 && Math.abs(x.dx) < range && Math.abs(x.dy) < (h || 50));
+const AI_USE = {
+  Dash: p => aiClear(p, 6),
+  Proyectil: (p, r) => aheadOf(p, r, 550),
+  Escudo: (p, r) => r.some(x => x.d < 140) || G.projectiles.some(pr => pr.owner !== p.id && Math.abs(pr.x - p.x) < 220 && Math.abs(pr.y - (p.y - 20)) < 60),
+  Congelar: (p, r) => r.some(x => x.d < 700),
+  Rezar: (p, r) => r.length > 0,
+  Hamburguesa: p => p.onGround,
+  Familia: (p, r) => r.length > 0,
+  Gordash: () => G.raceTime > 4,
+  Mantequilla: p => aiClear(p, 6),
+  Rayos: (p, r) => r.some(x => x.dx > 0),
+  'Dios gordo': (p, r) => r.length > 0,
+  Frase: (p, r) => r.some(x => x.d < MIRKO.FRASE_RANGE - 10),
+  Virus: (p, r) => aheadOf(p, r, 500),
+  Lag: (p, r) => r.some(x => x.d < 900),
+  'Avión': p => G.raceTime > 4 && !p.climbing,
+  Robo: (p, r) => r.some(x => x.d < YAKO.STEAL_RANGE - 10),
+  Poema: (p, r) => r.some(x => x.d < YAKO.POEM_RANGE - 10),
+  Guitarra: (p, r) => r.some(x => x.d < YAKO.GUITAR_RANGE - 20),
+  Ovni: p => G.raceTime > 4 && p.onGround,
+  Trago: p => p.onGround && p.buffT < 0.3 && p.drinks.filter(t => G.raceTime - t < NICOLAS.DRUNK_WINDOW).length < 2,
+  Calada: (p, r) => aheadOf(p, r, 320),
+  Grafiti: (p, r) => r.some(x => Math.abs(x.dx) < 700),
+  Grandote: (p, r) => r.some(x => x.d < 500),
+  Ruleta: p => p.luck < 40,
+  'Telaraña': (p, r) => r.some(x => x.dx > 40 && x.d < YAGO.WEB_RANGE * luckPower(p) - 20),
+  Embarazada: (p, r) => r.some(x => x.d < YAGO.WOMAN_RANGE),
+  Selfie: (p, r) => r.some(x => x.dx < -50),
+};
+
+// ¿Tiene n casillas libres por delante (suelo, sin paredes ni pinchos)? Para los dash
+function aiClear(p, n) {
+  const map = G.map, T = CONFIG.TILE, feet = Math.floor((p.y - 1) / T), x0 = Math.floor(p.x / T);
+  if (!p.onGround) return false;
+  for (let i = 1; i <= n; i++) {
+    const tx = x0 + i * p.facing, ground = isSolid(tileAt(map, tx, feet + 1)) || isOneWay(map, tx, feet + 1);
+    if (!ground || isSolid(tileAt(map, tx, feet)) || isSolid(tileAt(map, tx, feet - 1)) || tileAt(map, tx, feet) === 'A') return false;
+  }
+  return true;
+}
+
+class AiCtrl {
+  constructor(p) {
+    this.p = p; this.d = new Set(); this.pr = new Set();
+    this.thinkT = 0.5 + Math.random() * 0.5;   // cada cuánto piensa las habilidades (con algo de reacción)
+    this.climber = Math.random() < 0.5;        // a la mitad les gusta ir por arriba
+    this.bestX = 0; this.stuckT = 0; this.backT = 0;
+    this.turnT = 0; this.then = null;          // darse la vuelta y luego pulsar "then" (guitarra, lanzar)
+    this.holdT = 0; this.mash = false; this.wantUp = false; this.walkJump = false;
+    this.lastLadder = null; this.ladderFeet = 0; this.goLadder = null;   // la última escalera que pasó (por si hay que volver)
+    this.retreatT = 0;
+  }
+  down(a) { return this.d.has(a); }
+  pressed(a) { return this.pr.has(a); }
+  update() {
+    const p = this.p, next = new Set();
+    this.holdT = p.holding != null ? this.holdT + CONFIG.STEP : 0;
+    if (G.mode === 'race' && !p.finished) {
+      if (p.grabbedBy != null) { next.add(this.mash ? 'left' : 'right'); this.mash = !this.mash; }   // machacar para escaparse
+      else if (this.turnT > 0) {
+        next.add('left');
+        if (--this.turnT === 0 && this.then) { next.delete('left'); next.add(this.then); this.then = null; }
+      } else { this.move(next); this.fight(next); }
+    }
+    // soltar el salto al aterrizar (para poder volver a saltar) y mantenerlo al subir (salto alto)
+    if (next.has('jump') && this.d.has('jump') && p.onGround) next.delete('jump');
+    if (!next.has('jump') && this.d.has('jump') && p.vy < 0 && !p.onGround) next.add('jump');
+    this.pr = new Set([...next].filter(a => !this.d.has(a)));
+    this.d = next;
+  }
+  move(next) {
+    const p = this.p, map = G.map, T = CONFIG.TILE, dt = CONFIG.STEP;
+    const solid = (tx, ty) => isSolid(tileAt(map, tx, ty)) || wallBlocks(p, tx, ty);
+    const floor = (tx, ty) => solid(tx, ty) || isOneWay(map, tx, ty);
+    // atascado = no avanza pudiendo moverse (aturdido, congelado, pensando… no cuenta)
+    const busy = p.stunT > 0 || p.freezeT > 0 || p.thinkT > 0 || p.lagT > 0 || p.selfieT > 0 || p.abductT > 0 || p.webT > 0;
+    if (p.x < this.bestX - 96) this.bestX = p.x;   // ha vuelto atrás (checkpoint, empujón): cuenta desde aquí
+    if (p.x > this.bestX + 4 || p.climbing) { this.bestX = Math.max(this.bestX, p.x); this.stuckT = 0; } else if (!busy) this.stuckT += dt;
+    if (this.backT > 0) { this.backT -= dt; next.add('left'); if (this.backT < 0.2) next.add('jump'); return; }   // atascado: atrás y saltar
+    if (this.retreatT > 0) { this.retreatT -= dt; next.add('left'); return; }   // sin sitio para saltar: unos pasos atrás
+    next.add('run');
+    const feet = Math.floor((p.y - 1) / T), head = Math.floor((p.y - CONFIG.PLAYER_H + 2) / T);
+    const ahead = Math.floor((p.x + p.w / 2 + 6) / T), here = Math.floor(p.x / T);
+    if (p.avionT > 0) {
+      // avión: hacia la meta, subiendo si hay algo delante y bajando si va demasiado alto
+      next.add('right');
+      let block = false;
+      for (let tx = ahead; tx <= ahead + 4; tx++) for (let ty = head - 1; ty <= feet + 1; ty++) if (solid(tx, ty)) block = true;
+      if (block && p.y > 3 * T) next.add('up'); else if (!block && p.y < 6 * T) next.add('down');
+      return;
+    }
+    if (p.climbing) {
+      if (this.wantUp) next.add('up');
+      else next.add(solid(ahead, feet) || solid(ahead, feet - 1) ? 'up' : 'right');
+      return;
+    }
+    this.wantUp = false;
+    if (!p.onGround) {
+      // en el aire: si ya está encima de donde quiere caer y justo después hay un hueco, frena
+      if (p.vy > 0) {
+        let row = -1;
+        for (let ty = feet + 1; ty <= feet + 4; ty++) if (floor(here, ty)) { row = ty; break; }
+        if (row >= 0 && !floor(here + 1, row) && !floor(here + 2, row)) { next.add('left'); return; }
+      }
+      next.add('right');
+      if (this.walkJump) next.delete('run');
+      return;
+    }
+    this.walkJump = false;
+    // vuelve a la escalera que acaba de pasar (delante había un hueco imposible)
+    if (this.goLadder != null) {
+      if (feet !== this.ladderFeet || here < this.goLadder) this.goLadder = null;
+      else if (here > this.goLadder) { next.add('left'); return; }
+      else { next.add('up'); this.wantUp = true; this.goLadder = null; return; }
+    }
+    if (tileAt(map, here, feet) === 'H' && tileAt(map, here, feet - 2) === 'H') { this.lastLadder = here; this.ladderFeet = feet; }
+    if (tileAt(map, ahead, feet) === 'D' || tileAt(map, ahead + 1, feet) === 'D') { this.stuckT = 0; return; }   // espera a que se abra
+    const lowCeil = !solid(ahead, feet) && (solid(ahead, head) || (p.crouch && solid(here, head)));
+    if (this.stuckT > 5 && !lowCeil) { this.stuckT = 2; this.backT = 0.5; }
+    next.add('right');
+    let wallH = 0;
+    while (wallH < 12 && solid(ahead, feet - wallH)) wallH++;
+    const spikes = [ahead, ahead + 1].some(tx => tileAt(map, tx, feet) === 'A');
+    const enemy = map.enemies.some(e => {
+      if (G.deadEnemies.has(e.id)) return false;
+      const ep = enemyPos(e, G.raceTime);
+      return ep.x - p.x > 10 && ep.x - p.x < 75 && Math.abs(ep.y - p.y) < 24;
+    });
+    // ¿hay suelo a su altura más adelante? Entonces el hueco se salta en vez de dejarse caer
+    // (devuelve a cuántas casillas está, o 0)
+    const sameAhead = () => {
+      for (let tx = ahead + 1; tx <= ahead + 6; tx++) for (let ty = feet - 2; ty <= feet + 2; ty++) if (floor(tx, ty)) return tx - ahead;
+      return 0;
+    };
+    const gap = p.onGround && !floor(ahead, feet + 1);
+    // escalera que sube desde aquí: por una pared alta, pinchos o un hueco que no se salta; y a los que les gusta, siempre
+    if (p.onGround && tileAt(map, here, feet) === 'H' && tileAt(map, here, feet - 2) === 'H' &&
+        (wallH > 3 || spikes || (gap && !sameAhead()) || this.climber)) {
+      next.delete('right'); next.add('up');
+      this.wantUp = this.climber || wallH <= 3;   // con una pared alta delante, sale por el primer hueco que haya
+      return;
+    }
+    // plataforma justo encima y delante (con sitio encima para ponerse de pie)
+    const overhead = () => {
+      for (let tx = ahead; tx <= ahead + 2; tx++)
+        for (let ty = feet - 3; ty <= feet - 2; ty++)
+          if (floor(tx, ty) && !solid(tx, ty - 1) && !solid(tx, ty - 2)) return true;
+      return false;
+    };
+    // un hueco en el suelo en las próximas casillas (para saltarlo mejor desde arriba de un bloque)
+    const pitAhead = () => { for (let tx = ahead; tx <= ahead + 8; tx++) if (!floor(tx, feet + 1) && !solid(tx, feet)) return true; return false; };
+    const headroom = !solid(here, feet - 2) && !solid(here, feet - 3);
+    if (wallH > 0 && wallH <= 3) next.add('jump');
+    else if (wallH > 3) { if (this.stuckT > 0.6) next.add('jump'); }
+    else if (lowCeil) next.add('down');   // techo bajo: agachado
+    else if (p.onGround && (spikes || enemy)) next.add('jump');
+    else if (p.onGround && headroom && (this.climber || pitAhead()) && overhead()) next.add('jump');   // subirse a la plataforma de encima
+    else if (gap && !headroom) this.retreatT = 0.35;   // un techo encima no deja saltar el hueco: sale de debajo
+    else if (gap) {
+      const k = sameAhead();
+      if (k) { next.add('jump'); if (k <= 3) { this.walkJump = true; next.delete('run'); } }   // hueco corto: salto andando, para no pasarse
+      else {
+        let land = false, danger = false;
+        for (let ty = feet + 1; ty <= feet + 12 && ty < map.H && !land; ty++)
+          for (let tx = ahead; tx <= ahead + 3; tx++) {
+            if (tileAt(map, tx, ty) === 'A') danger = true;
+            if (floor(tx, ty)) { land = true; break; }
+          }
+        if (!land && this.lastLadder != null && feet === this.ladderFeet && here - this.lastLadder <= 12) { this.goLadder = this.lastLadder; next.delete('right'); }
+        else if (!land || danger) next.add('jump');
+      }
+    }
+    if (this.stuckT > 2.5 && !lowCeil) next.add('jump');
+  }
+  fight(next) {
+    const p = this.p;
+    if ((this.thinkT -= CONFIG.STEP) > 0) return;
+    this.thinkT = 0.25 + Math.random() * 0.35;
+    const rivals = [], sr = screenRect(p.x, p.y);
+    for (const o of G.players.values()) {
+      if (o === p) continue;
+      const v = viewOf(o);
+      if (v.flags & (F.FINISHED | F.DEAD)) continue;
+      const dx = v.x - p.x, dy = (v.y - v.h / 2) - (p.y - p.h / 2);
+      rivals.push({ o, v, dx, dy, d: Math.hypot(dx, dy), seen: v.x > sr.l && v.x < sr.r && v.y > sr.t && v.y < sr.b + 40 });
+    }
+    const wants = a => !AI_USE[a.name] || AI_USE[a.name](p, rivals);
+    // con alguien agarrado, se da la vuelta y lo lanza hacia atrás
+    // (en el aire o en una escalera lo lanza hacia delante: darse la vuelta le haría soltarse)
+    if (p.holding != null) {
+      if (this.holdT > 0.35) { if (p.onGround) { this.turnT = 4; this.then = 'grab'; } else next.add('grab'); }
+      return;
+    }
+    // avión: suelta la nuke cuando tiene a alguien en pantalla
+    if (p.avionT > 0) { if (MIRKO.AVION_TIME - p.avionT > 0.8 && rivals.some(x => x.seen)) next.add('ab3'); return; }
+    // habilidad robada (Yako): cuando le sirva o antes de perderla
+    if (p.stolen) { const a = stolenAbility(p); if (a && (wants(a) || p.stolen.t < 1.5)) { next.add('ab0'); return; } }
+    // agarrar: solo de pie y sin techo bajo (en un túnel o una escalera se enredan y no avanza nadie)
+    if (p.grabCd <= 0 && p.onGround && !p.crouch && !p.climbing && Math.random() < 0.35 &&
+        rivals.some(x => x.dx * p.facing > 0 && Math.abs(x.dx) < CONFIG.GRAB_RANGE - 4 && Math.abs(x.dy) < 30 && !(x.v.flags & (F.CROUCH | F.CLIMB)))) {
+      next.add('grab'); return;
+    }
+    const abs = abilitiesOf(p), order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+    for (const i of order) {
+      const a = abs[i];
+      if (!a || a.passive || p.cooldowns[i] > 0 || (a.charges && p.charges[i] <= 0) || (i === 0 && p.stolen)) continue;
+      if (!wants(a) || Math.random() > 0.7) continue;
+      if (a.name === 'Guitarra' && p.onGround) { this.turnT = 3; this.then = 'ab' + i; }   // mirando atrás, la onda los manda hacia atrás
+      else next.add('ab' + i);
+      return;
+    }
+  }
+}
+
 // =====================================================================
 // 4. JUGADOR — física y estados
 // =====================================================================
@@ -1038,6 +1858,8 @@ class Player {
     this.selfieT = 0;                            // Yago: posando para el selfie
     this.drinks = []; this.drunkT = 0;           // Nicolas: tiempos de los últimos tragos y borrachera
     this.smokeT = 0;                             // Calada de Nicolas: pantalla llena de humo
+    this.hitStopT = 0;                           // clavado un instante al recibir un golpe
+    this.jz = { air: false, vy: 0, vx: 0, sq: 0, hitT: 0, dustT: 0 };   // "juice" del dibujo: aplastarse al caer, polvo…
     this.finished = false;
     this.checkpoint = { x, y };
     this.rx = x; this.ry = y; this.rvx = 0; this.rvy = 0; this.rflags = 0; this.rfacing = 1; this.buf = [];
@@ -1139,15 +1961,16 @@ function ladderAt(map, p) {
   return -1;
 }
 
-// Qué pisa el jugador: 'solid', 'oneway' o null
-function standingOn(map, p) {
+// Qué pisa el jugador: 'solid', 'oneway' o null. Con "only": si pisa esa casilla (true/false)
+function standingOn(map, p, only) {
   const T = CONFIG.TILE, ty = Math.floor((p.y + 0.5) / T);
   let one = false;
   for (let tx = Math.floor((p.x - p.w / 2) / T); tx <= Math.floor((p.x + p.w / 2 - 0.001) / T); tx++) {
+    if (only) { if (tileAt(map, tx, ty) === only) return true; continue; }
     if (isSolid(tileAt(map, tx, ty))) return 'solid';
     if (isOneWay(map, tx, ty)) one = true;
   }
-  return one ? 'oneway' : null;
+  return only ? false : one ? 'oneway' : null;
 }
 
 function setCrouch(p, on) {
@@ -1164,7 +1987,7 @@ function startClimb(p, tx) {
 function stepPlayer(p, ctrl, dt) {
   const C = CONFIG, map = G.map, T = C.TILE;
   for (const k of ['coyote', 'jumpBuf', 'dropT', 'slideT', 'stunT', 'freezeT', 'slowT', 'shieldT', 'dashT', 'enemyImmuneT', 'grabCd', 'grabAnim', 'buffT', 'knockT',
-                   'avionT', 'thinkT', 'invertT', 'lagT', 'poemT', 'selfieT', 'webT', 'drunkT', 'smokeT'])
+                   'avionT', 'thinkT', 'invertT', 'lagT', 'poemT', 'selfieT', 'webT', 'drunkT', 'smokeT', 'hitStopT'])
     p[k] = Math.max(0, p[k] - dt);
   const cdr = p.form === 'marciano' ? YAKO.MARCIANO_CDR : 1;   // marciano: Y/U/I recargan el doble de rápido
   for (let i = 0; i < 4; i++) p.cooldowns[i] = Math.max(0, p.cooldowns[i] - dt * (i < 3 ? cdr : 1));
@@ -1203,6 +2026,11 @@ function stepPlayer(p, ctrl, dt) {
     if (p.mash >= C.GRAB_ESCAPE_PRESSES && !p.escapeSent) { p.escapeSent = true; sendIntent(p, { k: 'escape' }); }
     return;
   }
+
+  // Golpe recibido: se queda clavado un instante (hit-stop) antes de salir despedido. Los tiempos siguen corriendo
+  if (p.hitStopT > 0) return;
+
+  unstickDoor(p, map);
 
   // Ovni (Yako): se queda arriba con él un momento y vuelve convertido en marciano
   if (p.abductT > 0) {
@@ -1341,17 +2169,57 @@ function stepPlayer(p, ctrl, dt) {
   else p.vy = Math.min(p.vy + C.GRAVITY * dt, C.MAX_FALL);
   moveX(p, map, p.vx * dt);
   moveY(p, map, p.vy * dt, p.dropT > 0);
+  if (p.onGround && map.tramps && standingOn(map, p, 'T')) bounce(p);
   afterMove(p, map);
+}
+
+// Toldo (T): lanza muy alto, se quiera o no
+function bounce(p) {
+  if (p.crouch && canStand(G.map, p)) setCrouch(p, false);
+  p.vy = -CONFIG.TRAMPOLINE_VEL; p.onGround = false; p.coyote = 0; p.jumpBuf = 0; p.canCut = false; p.slideT = 0;
+}
+
+// Una puerta que se cierra con alguien dentro le echa hacia el lado más cercano
+function unstickDoor(p, map) {
+  if (!map.door || doorOpen(map)) return;
+  const T = CONFIG.TILE;
+  for (let tx = Math.floor((p.x - p.w / 2) / T); tx <= Math.floor((p.x + p.w / 2 - 0.001) / T); tx++)
+    for (let ty = Math.floor((p.y - p.h) / T); ty <= Math.floor((p.y - 0.001) / T); ty++)
+      if (tileAt(map, tx, ty) === 'D') { p.x = p.x < tx * T + T / 2 ? tx * T - p.w / 2 : (tx + 1) * T + p.w / 2; return; }
+}
+
+// Pinchos (A): la parte de abajo de la casilla pincha. Aturden y lanzan hacia atrás y arriba
+function checkSpikes(p, map) {
+  if (p.finished || p.avionT > 0 || p.enemyImmuneT > 0 || p.shieldT > 0) return;
+  const T = CONFIG.TILE;
+  for (let tx = Math.floor((p.x - p.w / 2 + 3) / T); tx <= Math.floor((p.x + p.w / 2 - 3) / T); tx++)
+    for (let ty = Math.floor((p.y - p.h) / T); ty <= Math.floor((p.y - 0.001) / T); ty++)
+      if (tileAt(map, tx, ty) === 'A' && p.y > ty * T + T * 0.45) {
+        stun(p, -(Math.sign(p.vx) || p.facing), CONFIG.SPIKE_STUN, CONFIG.SPIKE_KX, CONFIG.SPIKE_KY);
+        if (p.id === G.myId) { Sfx.play('spike'); floatText(p.x, p.y - p.h - 10, '¡AY!', '#ff6b6b'); }
+        return;
+      }
 }
 
 // Huecos, checkpoints, enemigos y meta después de moverse
 function afterMove(p, map) {
-  if (p.y > map.pxH + 120) respawn(p);
+  if (p.y > map.pxH + 120) {
+    if (p.id === G.myId) Sfx.play('fall');
+    respawn(p);
+  }
 
   for (const cp of map.checkpoints)
-    if (p.x >= cp.x && cp.x > p.checkpoint.x) p.checkpoint = { x: cp.x, y: cp.y };
+    if (p.x >= cp.x && cp.x > p.checkpoint.x) {
+      p.checkpoint = { x: cp.x, y: cp.y };
+      if (p.id === G.myId) {
+        Sfx.play('checkpoint');
+        floatText(cp.x, cp.y - 74, 'CHECKPOINT', '#2ecc71');
+        puff(cp.x + 14, cp.y - 55, '#2ecc71', 14, 200);
+      }
+    }
 
   checkEnemies(p);
+  if (map.spikes) checkSpikes(p, map);
 
   if (!p.finished && G.mode === 'race' && p.x >= map.finishX) {
     p.finished = true;
@@ -1389,6 +2257,8 @@ function stun(p, dir, dur, kx, ky) {
   p.vx = dir * (kx || CONFIG.STUN_KNOCK_X); p.vy = ky || CONFIG.STUN_KNOCK_Y;
   p.climbing = false; p.dashT = 0; p.slideT = 0; p.avionT = 0; p.webT = 0;
   if (p.holding != null) sendIntent(p, { k: 'drop' });
+  p.jz.hitT = 0.12;
+  if (p.id === G.myId) { p.hitStopT = CONFIG.HIT_STOP; G.hurtFlash = 0.35; G.shake = Math.max(G.shake, 0.12); }
 }
 
 // ---------- Suerte de Yago ----------
@@ -1460,6 +2330,7 @@ function checkEnemies(p) {
       p.vy = C.STOMP_BOUNCE; p.canCut = false;
     } else if (p.enemyImmuneT <= 0 && p.shieldT <= 0) {
       stun(p, Math.sign(p.x - ep.x) || -p.facing);
+      if (p.id === G.myId) { Sfx.play('hurt'); floatText(p.x, p.y - p.h - 10, '¡AU!', '#ff6b6b'); }
     }
   }
 }
@@ -1658,6 +2529,7 @@ function useAbility(p, i) {
   } else {
     p.cooldowns[i] = a.cd;
   }
+  if (p.id === G.myId) Sfx.play(i === 3 ? 'ulti' : 'cast' + i);
   a.use(p);
 }
 
@@ -1767,6 +2639,9 @@ const G = {
   selfie: null, zoom: 1, selfieFlash: 0,          // Yago: selfie en curso (todas las cámaras miran a Yago)
   walls: [], bigView: new Map(), shake: 0,        // Nicolas: muros, Grandotes vistos por un cliente (el anfitrión usa srv.bigs) y temblor
   nukes: [], blasts: [], nukeFlash: 0,            // Mirko: bombas cayendo, explosiones y destello en pantalla
+  texts: [], hurtFlash: 0, tramp: new Map(),      // juice: textos flotantes, borde rojo al recibir un golpe y toldos hundiéndose
+  doorWas: null,                                  // si las puertas estaban abiertas en el paso anterior (para su ruido)
+  mapKey: 'prueba', lobbyMap: 'prueba',           // mapa elegido (el anfitrión) y el que ve un cliente en la sala
   srv: null,             // datos solo del anfitrión
   netTimer: 0, camX: 0, camY: 0, fx: [], toasts: [], freezeFlash: 0,
   myName: 'Jugador', myColor: COLORS[0], myChar: 'basico',
@@ -1791,7 +2666,7 @@ function freeColor(c) {
 // ---------- Anfitrión ----------
 function startHosting() {
   readMenu();
-  G.net = new Net('host'); G.isHost = true; G.offline = false;
+  G.net = new Net('host'); G.isHost = true; G.offline = false; G.practice = false;
   G.nextId = 1;
   G.myId = 0;
   G.lobby = [{ id: 0, name: G.myName, color: G.myColor, char: G.myChar }];
@@ -1804,7 +2679,7 @@ function startHosting() {
 
 function startPractice() {
   readMenu();
-  G.net = new Net('offline'); G.isHost = true; G.offline = true;
+  G.net = new Net('offline'); G.isHost = true; G.offline = true; G.practice = true;
   G.myId = 0; G.code = '';
   G.lobby = [{ id: 0, name: G.myName, color: G.myColor, char: G.myChar },
              { id: 1, name: 'Muñeco', color: '#95a5a6', char: 'basico', bot: true }];
@@ -1824,7 +2699,12 @@ function hostOnConnection(conn) {
 function hostHello(conn, d) {
   const reject = reason => { conn.send({ t: 'reject', reason }); setTimeout(() => conn.close(), 500); };
   if (G.mode !== 'lobby') return reject('La carrera ya ha empezado. Espera a que vuelvan a la sala.');
-  if (G.lobby.length >= CONFIG.MAX_PLAYERS) return reject('La sala está llena (máximo ' + CONFIG.MAX_PLAYERS + ').');
+  if (G.lobby.length >= CONFIG.MAX_PLAYERS) {
+    // sala llena: si hay algún bot, la persona ocupa su sitio
+    const bot = [...G.lobby].reverse().find(p => p.ai);
+    if (!bot) return reject('La sala está llena (máximo ' + CONFIG.MAX_PLAYERS + ').');
+    G.lobby = G.lobby.filter(p => p !== bot);
+  }
   const id = G.nextId++;
   conn.playerId = id;
   G.net.conns.set(id, conn);
@@ -1845,14 +2725,49 @@ function hostDropConn(conn) {
   if (G.mode === 'race') hostCheckEnd();
 }
 
-function hostBroadcastLobby() { G.net.broadcast({ t: 'lobby', players: G.lobby }); }
+function hostBroadcastLobby() { G.net.broadcast({ t: 'lobby', players: G.lobby, map: G.mapKey }); }
+
+// Bots de la sala: los añade el anfitrión, con un personaje al azar (de los de verdad, no el Básico)
+const randomBotChar = () => { const cs = Object.keys(CHARACTERS).filter(c => c !== 'basico'); return cs[Math.floor(Math.random() * cs.length)]; };
+function hostAddBot() {
+  if (!G.isHost || G.mode !== 'lobby' || G.lobby.length >= CONFIG.MAX_PLAYERS) return;
+  const used = new Set(G.lobby.map(p => p.name));
+  const name = (BOT_NAMES.find(n => !used.has(n + ' 🤖')) || 'Bot') + ' 🤖';
+  G.lobby.push({ id: G.nextId++, name, color: freeColor(COLORS[Math.floor(Math.random() * COLORS.length)]), char: randomBotChar(), ai: true });
+  hostBroadcastLobby();
+}
+function hostRemoveBot(id) {
+  if (!G.isHost || G.mode !== 'lobby') return;
+  G.lobby = G.lobby.filter(p => !(p.ai && p.id === id));
+  hostBroadcastLobby();
+}
+function hostRerollBot(id) {
+  const b = G.isHost && G.mode === 'lobby' && G.lobby.find(p => p.ai && p.id === id);
+  if (!b) return;
+  const old = b.char;
+  for (let i = 0; i < 10 && b.char === old; i++) b.char = randomBotChar();
+  hostBroadcastLobby();
+}
+
+// Sala sin red contra bots (empieza con 3)
+function startBotRoom() {
+  readMenu();
+  G.net = new Net('offline'); G.isHost = true; G.offline = true; G.practice = false;
+  G.myId = 0; G.code = ''; G.nextId = 1; G.mode = 'lobby';
+  G.lobby = [{ id: 0, name: G.myName, color: G.myColor, char: G.myChar }];
+  for (let i = 0; i < CONFIG.MAX_PLAYERS - 1; i++) hostAddBot();
+  showLobby();
+}
 
 function hostStart() {
   if (!G.isHost || !G.lobby.length) return;
   // Las plataformas de salida se sortean para que no le toque siempre la misma a cada uno
   const slots = G.lobby.map((_, i) => i);
   for (let i = slots.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [slots[i], slots[j]] = [slots[j], slots[i]]; }
-  G.net.broadcast({ t: 'start', players: G.lobby.map((pl, i) => ({ ...pl, slot: slots[i] })) });
+  // "al azar": uno distinto del de la carrera anterior
+  const keys = Object.keys(MAPS), prev = G.map && G.map.key, pool = keys.filter(k => k !== prev);
+  const map = G.mapKey === MAP_RANDOM ? pool[Math.floor(Math.random() * pool.length)] : validMap(G.mapKey);
+  G.net.broadcast({ t: 'start', map, players: G.lobby.map((pl, i) => ({ ...pl, slot: slots[i] })) });
 }
 
 function hostState(id) {
@@ -1885,6 +2800,9 @@ function groundBelow(map, x, y) {
 }
 
 const FX_KINDS = new Set(['burger-good', 'burger-normal', 'burger-bad', 'gordash', 'avion', 'drink', 'drunk', 'ovni', 'ruleta']);
+// Sonido de cada burbuja de efecto (las que no salen aquí ya suenan con su propio evento)
+const FX_SOUND = { 'burger-good': 'powerup', 'burger-normal': 'nom', 'burger-bad': 'powerdown', gordash: 'powerup', avion: 'jet',
+                   drink: 'glug', drunk: 'powerdown', ovni: 'ufo', ruleta: 'roulette', paint: 'splat', mujer: 'pop' };
 
 // Potencia de la suerte que manda Yago con sus intenciones (por si llega cualquier cosa)
 const cleanLuck = k => Number.isFinite(k) ? Math.max(0.7, Math.min(1.3, k)) : 1;
@@ -2539,11 +3457,12 @@ function hostBigSlam(b) {
   }
 }
 
-// Corredores reales (los muñecos no cuentan para terminar la carrera)
+// Los que salen en los resultados: personas y bots de la sala (el muñeco de la práctica no)
 const racers = () => [...G.players.values()].filter(p => !p.bot);
 
+// La carrera se acaba cuando han llegado todas las personas (a los bots no se les espera)
 function hostCheckEnd() {
-  const list = racers();
+  const list = racers().filter(p => !p.ai);
   if (list.length && list.every(p => G.srv.finish.has(p.id))) hostEndRace();
 }
 
@@ -2593,9 +3512,9 @@ function clientHandle(msg) {
   switch (msg.t) {
     case 'welcome': G.myId = msg.id; G.code = msg.code; G.mode = 'lobby'; showLobby(); break;
     case 'reject': leaveToMenu(msg.reason); break;
-    case 'lobby': G.lobby = msg.players; renderLobby(); break;
+    case 'lobby': G.lobby = msg.players; G.lobbyMap = lobbyMapKey(msg.map); renderLobby(); break;
     case 'toLobby': G.mode = 'lobby'; G.srv = null; showLobby(); break;
-    case 'start': startRace(msg.players); break;
+    case 'start': startRace(msg.players, msg.map); break;
     case 'snap': {
       if (G.isHost) break;
       if (G.mode === 'countdown' && msg.rt > 0) { G.mode = 'race'; G.raceTime = msg.rt; }
@@ -2644,6 +3563,7 @@ function applyEvent(ev) {
   switch (ev.k) {
     case 'grab': {
       G.grabPairs.set(ev.v, ev.g);
+      sfxAt('grab', ev.g);
       const v = local(ev.v);
       if (v) { v.grabbedBy = ev.g; v.mash = 0; v.escapeSent = false; v.climbing = false; v.dashT = 0; v.slideT = 0; }
       const g = local(ev.g);
@@ -2652,6 +3572,7 @@ function applyEvent(ev) {
     }
     case 'release': {
       G.grabPairs.delete(ev.v);
+      if (ev.thrown) sfxAt('throw', ev.v);
       const v = local(ev.v);
       if (v) { v.grabbedBy = null; v.vx = ev.vx; v.vy = ev.vy; v.onGround = false; if (ev.thrown) v.stunT = CONFIG.THROW_STUN; }
       const g = local(ev.g);
@@ -2661,16 +3582,18 @@ function applyEvent(ev) {
     case 'proj':
       G.projectiles.push({ id: ev.id, owner: ev.owner, kind: ev.kind || 'proj', x: ev.x, y: ev.y, vx: ev.vx,
                            vy: ev.vy || 0, g: ev.g || 0, life: ev.life || CONFIG.PROJ_LIFE });
+      Sfx.play(ev.kind === 'smoke' ? 'hiss' : ev.kind === 'feto' ? 'pop' : 'shoot', ev.x, ev.y, ev.kind === 'feto' ? 0.5 : 1);
       break;
     case 'projEnd': {
       const pr = G.projectiles.find(p => p.id === ev.id);
       G.projectiles = G.projectiles.filter(p => p.id !== ev.id);
       const colors = { virus: '#39ff88', feto: '#ff9fb5', smoke: '#cfcfcf' };
-      if (ev.hit != null) puff(ev.x, ev.y, (pr && colors[pr.kind]) || '#b46cff', 10);
+      if (ev.hit != null) { puff(ev.x, ev.y, (pr && colors[pr.kind]) || '#b46cff', 10); Sfx.play('pop', ev.x, ev.y); }
       break;
     }
     case 'steal': {
-      if (ev.blocked) { toast(nameOf(ev.v) + ' esquiva el robo con el escudo', '#8fd8ff'); break; }
+      if (ev.blocked) { sfxAt('shield', ev.v); toast(nameOf(ev.v) + ' esquiva el robo con el escudo', '#8fd8ff'); break; }
+      sfxAt('gun', ev.by);
       const a = [0, 1, 2].includes(ev.i) && kitOf(ev.char, ev.form)[ev.i];
       if (!a || !Number.isFinite(ev.dur)) break;
       const by = local(ev.by), v = local(ev.v);
@@ -2682,6 +3605,7 @@ function applyEvent(ev) {
     case 'poem': {
       const text = POEMAS_YAKO[ev.i] || POEMAS_YAKO[0];
       G.bubbles.set(ev.by, { fx: 'poema', t: 2.5, text });
+      sfxAt('chime', ev.by);
       if (ev.v == null) break;
       if (ev.blocked) { toast(nameOf(ev.v) + ' no escucha el poema (escudo)', '#8fd8ff'); break; }
       const v = local(ev.v);
@@ -2693,13 +3617,16 @@ function applyEvent(ev) {
       G.bubbles.set(ev.by, { fx: 'guitarra', t: 1.6 });
       G.rings.push({ x: ev.x, y: ev.y, t: 0 });
       G.shake = Math.max(G.shake, 0.15);
+      Sfx.play('guitar', ev.x, ev.y);
       break;
     case 'web':
       G.webs.set(ev.id, { v: ev.v, t: ev.dur });
+      sfxAt('web', ev.id);
       break;
     case 'woman':
       G.women.push({ id: ev.id, owner: ev.owner, x: ev.x, y: ev.y, facing: ev.facing || 1, t: ev.life });
       puff(ev.x, ev.y - 30, '#ff9fb5', 14);
+      Sfx.play('pop', ev.x, ev.y);
       toast(nameOf(ev.owner) + ' invoca a una embarazada 🤰', '#ff9fb5');
       break;
     case 'womanEnd':
@@ -2713,6 +3640,7 @@ function applyEvent(ev) {
       break;
     case 'wave':
       G.waves.set(ev.id, { owner: ev.owner, x: ev.x, dir: 1, speed: ev.speed });
+      Sfx.play('crowd');
       toast('💃 ¡Una ola de mujeres va a por ' + nameOf(ev.owner) + '!', '#ff8fd0');
       break;
     case 'waveTurn': {
@@ -2726,9 +3654,11 @@ function applyEvent(ev) {
     case 'invert': {
       const v = local(ev.v);
       if (v && v.shieldT <= 0 && !v.finished) v.invertT = Math.max(v.invertT, ev.dur);
+      sfxAt('glitch', ev.v);
       break;
     }
     case 'lag':
+      Sfx.play('glitch');
       for (const p of G.localPlayers)
         if (p.id !== ev.by && p.shieldT <= 0 && !p.finished && p.deadT <= 0 && p.lagT <= 0) p.lagT = ev.dur;
       toast(nameOf(ev.by) + ' ha provocado LAG', '#39ff88');
@@ -2740,10 +3670,12 @@ function applyEvent(ev) {
         v.slowMult = v.slowT > 0 ? Math.min(v.slowMult, mult) : mult;
         v.slowT = Math.max(v.slowT, ev.dur);
       }
+      sfxAt('powerdown', ev.v, 0.6);
       break;
     }
     case 'beam':
       G.beams.push({ v: ev.v, kind: ev.kind, t: 0.45 });
+      sfxAt(ev.kind === 'pray' ? 'bell' : 'zap', ev.v);
       break;
     case 'knock': {
       const v = local(ev.v);
@@ -2757,27 +3689,42 @@ function applyEvent(ev) {
     case 'stun': {
       const v = local(ev.v);
       if (v && v.shieldT <= 0 && v.grabbedBy == null && !v.finished && v.deadT <= 0) stun(v, ev.dir, ev.dur, ev.kx, ev.ky);
+      // impacto que ven todos: chispazo, destello en el dibujo y golpe
+      const p = G.players.get(ev.v);
+      if (p) {
+        const pv = viewOf(p);
+        p.jz.hitT = 0.12;
+        puff(pv.x, pv.y - pv.h / 2, '#fff6c2', 8, 240);
+        Sfx.play(ev.kx ? 'punch' : 'hit', pv.x, pv.y);
+        if (p.id === G.myId) floatText(pv.x, pv.y - pv.h - 10, '¡AU!', '#ff6b6b');
+      }
       break;
     }
     case 'smoke': {
       const v = local(ev.v);
       if (v && v.shieldT <= 0 && !v.finished) v.smokeT = Math.max(v.smokeT, ev.dur);
+      sfxAt('hiss', ev.v);
       break;
     }
     case 'wall':
+      Sfx.play('splat', ev.tx * CONFIG.TILE, ev.ty * CONFIG.TILE);
       G.walls.push({ id: ev.id, owner: ev.owner, tx: ev.tx, ty: ev.ty, h: NICOLAS.WALL_TILES,
                      t: NICOLAS.WALL_WARN + NICOLAS.WALL_TIME, active: false, pass: new Set() });
       break;
     case 'bigStart': {
       const p = G.players.get(ev.owner);
       if (p) { const v = viewOf(p); puff(v.x, v.y - 30, '#ffd23f', 12); }
+      sfxAt('whistle', ev.owner);
       toast(nameOf(ev.owner) + ' llama al GRANDOTE', '#e08a4f');
       break;
     }
     case 'bigHit':
       puff(ev.x, ev.y, '#e08a4f', 10 + 4 * (ev.n || 1), 220);
+      Sfx.play('punch', ev.x, ev.y);
+      floatText(ev.x, ev.y - 20, '−' + (ev.n || 1), '#ffb04f', 20);
       break;
     case 'bigDown':
+      sfxAt('ko', ev.by);
       toast(nameOf(ev.by) + ' tumba al Grandote de ' + nameOf(ev.owner), '#ffd23f');
       break;
     case 'bigEnd':
@@ -2786,18 +3733,22 @@ function applyEvent(ev) {
       break;
     case 'bigSlam':
       G.shake = Math.max(G.shake, ev.big ? 0.35 : 0.25);
+      Sfx.play('thump', ev.x, ev.y);
       puff(ev.x - 60, ev.y - 6, '#d9c3a0', 10, 200); puff(ev.x + 60, ev.y - 6, '#d9c3a0', 10, 200);
       break;
     case 'bounce': {
       const v = local(ev.v);
       if (v) { v.vy = CONFIG.STOMP_BOUNCE; v.canCut = false; }
+      sfxAt('stomp', ev.v);
       break;
     }
     case 'minionEnd':
       G.minionView.delete(ev.id);
       puff(ev.x, ev.y - 14, '#c8a27a', 12);
+      Sfx.play('pop', ev.x, ev.y);
       break;
     case 'fatgod': {
+      Sfx.play('choir');
       const me = G.players.get(G.myId);
       if (me && me.id !== ev.by && me.shieldT <= 0) { G.fatGodT = ev.dur; G.fatGodTotal = ev.dur; }
       else if (me && me.id === ev.by) G.fatGodMini = ev.dur;
@@ -2806,6 +3757,7 @@ function applyEvent(ev) {
     }
     case 'fx': {
       G.bubbles.set(ev.id, { fx: ev.fx, t: 1.6, n: ev.n });
+      if (FX_SOUND[ev.fx]) sfxAt(FX_SOUND[ev.fx], ev.id);
       const p = G.players.get(ev.id);
       if (ev.fx === 'ovni' && p) toast('🛸 Un ovni abduce a ' + p.name + '…', '#7dff7a');
       if (ev.fx === 'gordash' && p) {
@@ -2822,6 +3774,7 @@ function applyEvent(ev) {
     }
     case 'frase': {
       G.bubbles.set(ev.by, { fx: 'frase', t: 2.5, text: FRASES_MIRKO[ev.i] || FRASES_MIRKO[0] });
+      sfxAt('chime', ev.by);
       for (const id of ev.v || []) {
         const v = local(id);
         if (v && v.shieldT <= 0 && !v.finished && v.deadT <= 0) { v.thinkT = Math.max(v.thinkT, ev.dur); v.thinkText = G.bubbles.get(ev.by).text; v.dashT = 0; v.avionT = 0; }
@@ -2830,12 +3783,14 @@ function applyEvent(ev) {
     }
     case 'nukeDrop':
       G.nukes.push({ id: ev.id, owner: ev.owner, x: ev.x, y: ev.y, vx: ev.vx, vy: 0 });
+      Sfx.play('bombfall', ev.x, ev.y);
       toast(nameOf(ev.owner) + ' suelta la NUKE ☢', '#ff5a4f');
       break;
     case 'nuke': {
       G.nukes = G.nukes.filter(n => n.id !== ev.id);
       G.blasts.push({ x: ev.x, y: ev.y, t: 0 });
       G.shake = Math.max(G.shake, 0.6);
+      Sfx.play('boom', ev.x, ev.y);
       const me = G.players.get(G.myId), sr = me && screenRect(viewOf(me).x, viewOf(me).y);
       if (sr && ev.x > sr.l - 200 && ev.x < sr.r + 200 && ev.y > sr.t - 200 && ev.y < sr.b + 200) G.nukeFlash = 1;   // la ves de cerca
       const dead = new Set(ev.v || []);
@@ -2854,37 +3809,50 @@ function applyEvent(ev) {
       for (const p of G.localPlayers)
         if (p.id !== ev.by && p.shieldT <= 0 && !p.finished && p.deadT <= 0) { p.freezeT = ev.dur; p.dashT = 0; p.avionT = 0; }
       G.freezeFlash = 0.6;
+      Sfx.play('freeze');
       toast(nameOf(ev.by) + ' ha congelado a todos', '#8fd8ff');
       break;
     case 'enemy': {
       G.deadEnemies.add(ev.e);
       const e = G.map.enemies[ev.e];
-      if (e) { const ep = enemyPos(e, G.raceTime); puff(ep.x, ep.y - 12, '#e74c3c', 10); }
+      if (e) {
+        const ep = enemyPos(e, G.raceTime);
+        puff(ep.x, ep.y - 12, '#e74c3c', 10);
+        Sfx.play('stomp', ep.x, ep.y);
+        floatText(ep.x, ep.y - 30, '¡PLAF!', '#ffd23f');
+      }
       break;
     }
-    case 'finish':
+    case 'finish': {
       G.finishInfo.set(ev.id, { time: ev.time, place: ev.place });
+      const p = G.players.get(ev.id), fy = p ? viewOf(p).y - 40 : G.map.pxH - 4 * CONFIG.TILE;
+      confetti(G.map.finishX, fy, ev.id === G.myId ? 70 : 30);
+      Sfx.play(ev.id === G.myId ? 'fanfare' : 'ding', ev.id === G.myId ? null : G.map.finishX, fy);
+      if (ev.id === G.myId) floatText(G.map.finishX, fy - 30, ev.place + 'º', '#ffd23f', 30);
       toast(nameOf(ev.id) + ' llega ' + ev.place + 'º (' + fmtTime(ev.time) + ')', '#ffd23f');
       break;
+    }
   }
 }
 
 // ---------- Común ----------
-function startRace(list) {
-  G.map = buildMap(MAPS.prueba);
+function startRace(list, mapKey) {
+  const key = validMap(mapKey);
+  G.map = buildMap(MAPS[key]);
+  G.map.key = key;
   const spawns = addSpawnPlatforms(G.map, list.length);
   G.players.clear(); G.localPlayers = []; G.ctrls.clear();
   list.forEach((info, i) => {
-    const local = info.id === G.myId || (G.isHost && !!info.bot);
+    const local = info.id === G.myId || (G.isHost && !!(info.bot || info.ai));
     const p = new Player(info.id, info.name, info.color, local, info.char);
-    p.bot = !!info.bot;
+    p.bot = !!info.bot; p.ai = !!info.ai;
     const slot = Number.isInteger(info.slot) && info.slot >= 0 && info.slot < list.length ? info.slot : i;
     p.spawn = spawns[slot];
     p.reset(p.spawn.x, p.spawn.y);
     G.players.set(p.id, p);
     if (local) {
       G.localPlayers.push(p);
-      G.ctrls.set(p.id, p.bot ? new BotCtrl(p) : KeyCtrl);
+      G.ctrls.set(p.id, p.bot ? new BotCtrl(p) : p.ai ? new AiCtrl(p) : KeyCtrl);
     }
   });
   G.deadEnemies.clear(); G.projectiles = []; G.grabPairs.clear(); G.finishInfo.clear();
@@ -2893,6 +3861,7 @@ function startRace(list) {
   G.rings = []; G.webs.clear(); G.women = []; G.waves.clear(); G.selfie = null; G.zoom = 1; G.selfieFlash = 0;
   G.walls = []; G.bigView.clear(); G.shake = 0;
   G.nukes = []; G.blasts = []; G.nukeFlash = 0;
+  G.texts = []; G.hurtFlash = 0; G.tramp.clear(); G.doorWas = null;
   G.raceTime = 0; G.countdown = CONFIG.COUNTDOWN; G.mode = 'countdown';
   G.camX = 0; G.camY = G.map.pxH - CONFIG.VIEW_H;
   if (G.isHost) {
@@ -2965,9 +3934,37 @@ function puff(x, y, color, n, spd) {
   if (G.fx.length > 400) G.fx.splice(0, G.fx.length - 400);
 }
 
+// Polvo a los pies (al caer, al saltar, al correr): flota un poco y se deshace
+function dust(x, y, n) {
+  for (let i = 0; i < n; i++)
+    G.fx.push({ x: x + (Math.random() - 0.5) * 16, y: y - 2, vx: (Math.random() - 0.5) * 140, vy: -20 - Math.random() * 60,
+                life: 0.25 + Math.random() * 0.2, color: 'rgba(225,215,195,.85)', g: -40, s: 4 + Math.random() * 3 });
+  if (G.fx.length > 400) G.fx.splice(0, G.fx.length - 400);
+}
+
+// Confeti al llegar a la meta
+function confetti(x, y, n) {
+  for (let i = 0; i < n; i++)
+    G.fx.push({ x: x + (Math.random() - 0.5) * 40, y, vx: (Math.random() - 0.5) * 520, vy: -250 - Math.random() * 450,
+                life: 1.2 + Math.random() * 0.8, color: COLORS[i % COLORS.length], g: 500, s: 5 });
+  if (G.fx.length > 400) G.fx.splice(0, G.fx.length - 400);
+}
+
+// Texto que sube y se desvanece sobre el mapa (¡AU!, CHECKPOINT, −2…)
+function floatText(x, y, text, color, size) {
+  G.texts.push({ x, y, text, color: color || '#fff', size: size || 16, t: 1 });
+  if (G.texts.length > 30) G.texts.shift();
+}
+
+// Suena donde está un jugador (tal y como lo ve esta máquina)
+function sfxAt(name, id, vol) {
+  const p = G.players.get(id), v = p && viewOf(p);
+  if (v) Sfx.play(name, v.x, v.y - 20, vol); else Sfx.play(name, null, null, vol);
+}
+
 function leaveToMenu(msg) {
   if (G.net) G.net.close();
-  Object.assign(G, { net: null, isHost: false, offline: false, myId: null, code: '',
+  Object.assign(G, { net: null, isHost: false, offline: false, practice: false, myId: null, code: '',
                      lobby: [], mode: 'menu', srv: null, map: null });
   G.players.clear(); G.localPlayers = []; G.ctrls.clear();
   showPanel('menu');
@@ -2977,10 +3974,20 @@ function leaveToMenu(msg) {
 // ---------- Bucle principal ----------
 function fixedStep(dt) {
   if (G.mode === 'countdown') {
+    const before = Math.ceil(G.countdown);
     G.countdown -= dt;
-    if (G.countdown <= 0) { G.mode = 'race'; G.raceTime = 0; }
+    if (G.countdown <= 0) { G.mode = 'race'; G.raceTime = 0; Sfx.play('go'); }
+    else if (Math.ceil(G.countdown) !== before) Sfx.play('beep');
   } else if (G.mode === 'race') {
+    const before = Math.ceil(CONFIG.RACE_TIME - G.raceTime);
     G.raceTime += dt;
+    const left = Math.ceil(CONFIG.RACE_TIME - G.raceTime);
+    if (left !== before && left <= 10 && left > 0) Sfx.play('tick');   // últimos 10 s
+  }
+  if (G.map && G.map.door && G.mode === 'race') {
+    const open = doorOpen(G.map);
+    if (G.doorWas !== null && open !== G.doorWas) doorSound();
+    G.doorWas = open;
   }
   if (G.mode === 'countdown' || G.mode === 'race' || G.mode === 'results') {
     for (const p of G.localPlayers) {
@@ -3004,8 +4011,12 @@ function fixedStep(dt) {
     stepWalls(dt);
     if (G.isHost && G.mode === 'race') hostTick(dt);
   }
-  for (const f of G.fx) { f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 600 * dt; f.life -= dt; }
+  for (const f of G.fx) { f.x += f.vx * dt; f.y += f.vy * dt; f.vy += (f.g != null ? f.g : 600) * dt; f.life -= dt; }
   G.fx = G.fx.filter(f => f.life > 0);
+  for (const t of G.texts) { t.t -= dt; t.y -= 45 * dt; }
+  G.texts = G.texts.filter(t => t.t > 0);
+  G.hurtFlash = Math.max(0, G.hurtFlash - dt);
+  for (const [k, t] of [...G.tramp]) if (t <= dt) G.tramp.delete(k); else G.tramp.set(k, t - dt);
   for (const t of G.toasts) t.t -= dt;
   G.toasts = G.toasts.filter(t => t.t > 0);
   G.freezeFlash = Math.max(0, G.freezeFlash - dt);
@@ -3019,9 +4030,17 @@ function fixedStep(dt) {
   G.blasts = G.blasts.filter(b => b.t < 3);
   for (const r of G.rings) r.t += dt;
   G.rings = G.rings.filter(r => r.t < 0.5);
-  if (G.selfie && (G.selfie.t -= dt) <= 0) { G.selfie = null; G.selfieFlash = 0.35; }   // ¡clic!
+  if (G.selfie && (G.selfie.t -= dt) <= 0) { G.selfie = null; G.selfieFlash = 0.35; Sfx.play('click'); }   // ¡clic!
   G.selfieFlash = Math.max(0, G.selfieFlash - dt);
   Input.endStep();
+}
+
+// Clanc de las puertas al abrirse o cerrarse: suena la más cercana a la cámara (si se ve)
+function doorSound() {
+  const map = G.map, T = CONFIG.TILE, cx = G.camX + CONFIG.VIEW_W / 2;
+  let best = null;
+  for (const tx of map.doorCols) if (best == null || Math.abs(tx * T - cx) < Math.abs(best * T - cx)) best = tx;
+  if (best != null) Sfx.play('door', best * T + T / 2, G.camY + CONFIG.VIEW_H / 2);
 }
 
 // Muros del Grafiti: aviso y luego sólidos. Quien está dentro al aparecer no
@@ -3061,6 +4080,7 @@ function frame(now) {
   netStep(dt);
   render(now, dt);
   Touch.update();
+  Sfx.updateMusic();
   requestAnimationFrame(frame);
 }
 
@@ -3070,10 +4090,27 @@ function frame(now) {
 const cv = document.getElementById('game');
 const ctx = cv.getContext('2d');
 
+// En iPhone, Safari (no la app de la pantalla de inicio) pone su barra flotante encima de la página
+const IPHONE_SAFARI = /iPhone|iPod/.test(navigator.userAgent) && !navigator.standalone && !matchMedia('(display-mode: standalone)').matches;
+
+// Zona de la pantalla que se ve de verdad: sin muescas, sin la raya de inicio y sin la barra de Safari
+function viewBox() {
+  const probe = document.getElementById('safeProbe'), cs = getComputedStyle(probe), px = k => parseFloat(cs[k]) || 0;
+  const vv = window.visualViewport;
+  const H = Math.min(innerHeight, vv ? vv.height : innerHeight, probe.offsetHeight || innerHeight);
+  let bottom = px('paddingBottom');
+  // si la página llega hasta abajo del todo, la barra flotante de Safari la tapa: se le deja sitio
+  if (IPHONE_SAFARI && H > Math.min(screen.width, screen.height) - 30) bottom = Math.max(bottom, 50);
+  const x = px('paddingLeft'), y = px('paddingTop');
+  return { x, y, w: innerWidth - x - px('paddingRight'), h: H - y - bottom };
+}
+
 function resize() {
-  const s = Math.min(innerWidth / CONFIG.VIEW_W, innerHeight / CONFIG.VIEW_H);
-  cv.style.width = Math.floor(CONFIG.VIEW_W * s) + 'px';
-  cv.style.height = Math.floor(CONFIG.VIEW_H * s) + 'px';
+  const v = viewBox(), s = Math.min(v.w / CONFIG.VIEW_W, v.h / CONFIG.VIEW_H);
+  const w = Math.floor(CONFIG.VIEW_W * s), h = Math.floor(CONFIG.VIEW_H * s);
+  cv.style.width = w + 'px'; cv.style.height = h + 'px';
+  cv.style.left = Math.round(v.x + (v.w - w) / 2) + 'px';
+  cv.style.top = Math.round(v.y + (v.h - h) / 2) + 'px';
 }
 
 function rr(x, y, w, h, r) {
@@ -3088,6 +4125,7 @@ function rr(x, y, w, h, r) {
 
 function drawSky(camX) {
   const W = CONFIG.VIEW_W, H = CONFIG.VIEW_H;
+  if (G.map && THEME_SKY[G.map.tema]) return THEME_SKY[G.map.tema](camX, G.camY, W, H);
   const bg = G.map && G.map.fondo && ART.fondos[G.map.fondo], img = bg && artImage(bg.src);
   if (img) {
     // fondo del mapa: su borde de abajo queda a la altura de la hierba (2 casillas
@@ -3120,6 +4158,99 @@ function drawSky(camX) {
   }
 }
 
+// Colores de las casillas según el tema del mapa
+const THEMES = {
+  colegio:   { ground: '#8a5a35', dots: '#7a4d2c', top: '#4caf50', topDark: '#3e9142', block: '#d9822b', blockLine: '#a85f1a', blockEdge: '#6b3a0f', spike: '#cfd8dc' },
+  pasillo:   { ground: '#4b5672', dots: '#424b66', top: '#d7dde9', topDark: '#a9b3c8', block: '#3f7fbf', blockLine: '#2c5c8f', blockEdge: '#1d3c5e', spike: '#ff5a4f' },
+  atardecer: { ground: '#6e6a78', dots: '#5f5b69', top: '#b4523c', topDark: '#87392a', block: '#9aa3ad', blockLine: '#6f7780', blockEdge: '#4a5058', spike: '#d0d6dc' },
+  noche:     { ground: '#4a4560', dots: '#3f3a54', top: '#8b86a6', topDark: '#6a6585', block: '#7a6a58', blockLine: '#5a4c3e', blockEdge: '#3b3128', spike: '#b8c2d8' },
+};
+
+// Fondos dibujados de los mapas que no tienen dibujo de fondo. horizon(k): altura en pantalla
+// del suelo del mapa con parallax k (1 = se mueve con el suelo, 0 = quieto)
+const horizon = (camY, H, k) => (G.map.pxH - 2 * CONFIG.TILE - camY) * k + H * 0.82 * (1 - k);
+const wrapX = (camX, k, period) => -((camX * k) % period + period) % period;
+const THEME_SKY = {
+  // pasillo del colegio: pared, ventanas, relojes y taquillas
+  pasillo(camX, camY, W, H) {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#d9c9a3'); g.addColorStop(0.15, '#efe3c4'); g.addColorStop(1, '#e2d2ab');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    const hy = horizon(camY, H, 0.5);
+    for (let x = wrapX(camX, 0.4, 420) - 420; x < W + 420; x += 420) {
+      ctx.fillStyle = '#8d7b55'; ctx.fillRect(x + 40, hy - 330, 170, 160);
+      const gl = ctx.createLinearGradient(0, hy - 322, 0, hy - 178);
+      gl.addColorStop(0, '#7cc4f0'); gl.addColorStop(1, '#cdeeff');
+      ctx.fillStyle = gl; ctx.fillRect(x + 48, hy - 322, 154, 144);
+      ctx.fillStyle = '#8d7b55'; ctx.fillRect(x + 122, hy - 322, 6, 144); ctx.fillRect(x + 48, hy - 254, 154, 6);
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + 330, hy - 300, 22, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#3a3a3a'; ctx.lineWidth = 3; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 330, hy - 300); ctx.lineTo(x + 330, hy - 314); ctx.moveTo(x + 330, hy - 300); ctx.lineTo(x + 341, hy - 300); ctx.stroke();
+    }
+    ctx.fillStyle = '#6f9e86'; ctx.fillRect(0, hy - 120, W, H);
+    ctx.fillStyle = '#5a8670'; ctx.fillRect(0, hy - 124, W, 6);
+    const ly = horizon(camY, H, 0.7);
+    for (let x = wrapX(camX, 0.65, 520) - 520; x < W + 520; x += 520)
+      for (let i = 0; i < 5; i++) {
+        const lx = x + 60 + i * 38;
+        ctx.fillStyle = i % 2 ? '#3a74ad' : '#4483c0'; ctx.fillRect(lx, ly - 130, 36, 130);
+        ctx.fillStyle = '#2a5683'; for (let k = 0; k < 4; k++) ctx.fillRect(lx + 8, ly - 120 + k * 6, 20, 2);
+        ctx.fillRect(lx + 28, ly - 70, 4, 12);
+      }
+  },
+  // azotea al atardecer: sol, ciudad lejana y edificios con ventanas encendidas
+  atardecer(camX, camY, W, H) {
+    const hy = horizon(camY, H, 0.3), g = ctx.createLinearGradient(0, 0, 0, hy);
+    g.addColorStop(0, '#2d1b4e'); g.addColorStop(0.4, '#7b2f63'); g.addColorStop(0.75, '#e8664a'); g.addColorStop(1, '#ffc46b');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.shadowColor = '#ffd27a'; ctx.shadowBlur = 40;
+    ctx.fillStyle = '#ffe08a'; ctx.beginPath(); ctx.arc(W * 0.72, hy - 70, 58, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    for (const [k, col, base, tall, lit] of [[0.15, '#5a2a55', 0.3, 140, false], [0.35, '#341a3c', 0.55, 220, true]]) {
+      const by = horizon(camY, H, base), first = Math.floor(camX * k / 60) - 1;
+      for (let n = first; n * 60 - camX * k < W; n++) {
+        const x = n * 60 - camX * k, m = n & 1023, bh = 40 + hash2(m, tall) % tall;
+        ctx.fillStyle = col; ctx.fillRect(x, by - bh, 58, H);
+        if (lit) {
+          ctx.fillStyle = 'rgba(255,210,120,.8)';
+          for (let wy = 12; wy < bh - 10; wy += 18)
+            for (let wx = 8; wx < 50; wx += 14) if (hash2(m * 31 + wx, wy) % 3 === 0) ctx.fillRect(x + wx, by - bh + wy, 6, 8);
+        }
+      }
+    }
+  },
+  // noche: estrellas, luna, montañas y torres con reloj
+  noche(camX, camY, W, H) {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#070b24'); g.addColorStop(1, '#232b63');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    const t = performance.now() / 1000;
+    ctx.fillStyle = '#fff';
+    for (let i = 0; i < 90; i++) {
+      const sx = ((hash2(i, 7) % 1200) - camX * 0.04) % 1200, sy = hash2(i, 11) % 400 - camY * 0.05;
+      ctx.globalAlpha = 0.55 + 0.45 * Math.sin(t * 2 + i);
+      ctx.fillRect(sx < 0 ? sx + 1200 : sx, sy, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#f4f1d0'; ctx.beginPath(); ctx.arc(W * 0.8, 90, 34, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#d8d4b0'; ctx.beginPath(); ctx.arc(W * 0.8 - 10, 82, 7, 0, Math.PI * 2); ctx.arc(W * 0.8 + 12, 100, 5, 0, Math.PI * 2); ctx.fill();
+    const hy = horizon(camY, H, 0.3);
+    ctx.fillStyle = '#151a3d';
+    for (let x = wrapX(camX, 0.15, 300) - 300; x < W + 300; x += 300) {
+      ctx.beginPath(); ctx.moveTo(x, hy); ctx.lineTo(x + 150, hy - 140); ctx.lineTo(x + 300, hy); ctx.fill();
+    }
+    ctx.fillRect(0, hy - 1, W, H);
+    const ty = horizon(camY, H, 0.45);
+    for (let x = wrapX(camX, 0.3, 900) - 900; x < W + 900; x += 900) {
+      ctx.fillStyle = '#10142f'; ctx.fillRect(x + 300, ty - 380, 90, 380);
+      ctx.beginPath(); ctx.moveTo(x + 290, ty - 380); ctx.lineTo(x + 345, ty - 460); ctx.lineTo(x + 400, ty - 380); ctx.fill();
+      ctx.fillStyle = '#f6e7a1'; ctx.beginPath(); ctx.arc(x + 345, ty - 330, 26, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#10142f'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x + 345, ty - 330); ctx.lineTo(x + 345, ty - 348); ctx.moveTo(x + 345, ty - 330); ctx.lineTo(x + 358, ty - 326); ctx.stroke();
+    }
+    ctx.fillStyle = '#10142f'; ctx.fillRect(0, ty, W, H);
+  },
+};
+
 // Número pseudoaleatorio fijo para (a, b): el Poema distorsiona siempre igual mientras dura
 function hash2(a, b) {
   let h = Math.imul(a, 374761393) + Math.imul(b, 668265263) | 0;
@@ -3143,7 +4274,7 @@ function poemTile(map, tx, ty, seed) {
 }
 
 function drawTiles(me, now) {
-  const T = CONFIG.TILE, map = G.map, z = G.zoom;
+  const T = CONFIG.TILE, map = G.map, z = G.zoom, th = THEMES[map.tema] || THEMES.colegio;
   const poem = me && me.poemT > 0, at = poem ? (tx, ty) => poemTile(map, tx, ty, me.poemSeed) : (tx, ty) => tileAt(map, tx, ty);
   const x0 = Math.max(0, Math.floor(G.camX / T)), x1 = Math.min(map.W - 1, Math.floor((G.camX + CONFIG.VIEW_W / z) / T));
   const y0 = Math.max(0, Math.floor(G.camY / T)), y1 = Math.min(map.H - 1, Math.floor((G.camY + CONFIG.VIEW_H / z) / T));
@@ -3151,14 +4282,30 @@ function drawTiles(me, now) {
     for (let tx = x0; tx <= x1; tx++) {
       const c = at(tx, ty), x = tx * T, y = ty * T + (poem ? Math.round(Math.sin(now / 250 + tx * 0.7) * 3) : 0);   // con el poema, todo ondula
       if (c === '#') {
-        ctx.fillStyle = '#8a5a35'; ctx.fillRect(x, y, T, T);
-        ctx.fillStyle = '#7a4d2c'; ctx.fillRect(x + 4, y + 18, 6, 4); ctx.fillRect(x + 20, y + 8, 5, 4);
-        if (!isSolid(at(tx, ty - 1))) { ctx.fillStyle = '#4caf50'; ctx.fillRect(x, y, T, 7); ctx.fillStyle = '#3e9142'; ctx.fillRect(x, y + 7, T, 2); }
+        ctx.fillStyle = th.ground; ctx.fillRect(x, y, T, T);
+        ctx.fillStyle = th.dots; ctx.fillRect(x + 4, y + 18, 6, 4); ctx.fillRect(x + 20, y + 8, 5, 4);
+        const up = at(tx, ty - 1);
+        if (!isSolid(up)) { ctx.fillStyle = th.top; ctx.fillRect(x, y, T, 7); ctx.fillStyle = th.topDark; ctx.fillRect(x, y + 7, T, 2); }
       } else if (c === '=') {
-        ctx.fillStyle = '#d9822b'; ctx.fillRect(x, y, T, T);
-        ctx.fillStyle = '#a85f1a';
+        ctx.fillStyle = th.block; ctx.fillRect(x, y, T, T);
+        ctx.fillStyle = th.blockLine;
         ctx.fillRect(x, y + 15, T, 2); ctx.fillRect(x + 15, y, 2, 15); ctx.fillRect(x + 7, y + 17, 2, 15); ctx.fillRect(x + 23, y + 17, 2, 15);
-        ctx.strokeStyle = '#6b3a0f'; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, T - 2, T - 2);
+        ctx.strokeStyle = th.blockEdge; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + 1, T - 2, T - 2);
+      } else if (c === 'D' || c === 'd') {
+        drawDoorTile(map, tx, ty, x, y, c === 'D', at, now);
+      } else if (c === 'A') {
+        // pinchos (en el pasillo, chinchetas rojas)
+        ctx.fillStyle = th.spike; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let i = 0; i < 3; i++) { ctx.moveTo(x + 2 + i * 10, y + T); ctx.lineTo(x + 7 + i * 10, y + 12); ctx.lineTo(x + 12 + i * 10, y + T); }
+        ctx.fill(); ctx.stroke();
+      } else if (c === 'T') {
+        // toldo de rayas con muelles; se hunde un momento al rebotar alguien
+        const k = G.tramp.get(ty * map.W + tx) || 0, d = Math.round(Math.sin(Math.min(1, k / 0.25) * Math.PI) * 8);
+        ctx.fillStyle = th.ground; ctx.fillRect(x, y, T, T);
+        ctx.fillStyle = '#7f8c8d'; ctx.fillRect(x + 5, y + 10 + d, 4, T - 10 - d); ctx.fillRect(x + T - 9, y + 10 + d, 4, T - 10 - d);
+        for (let i = 0; i < 4; i++) { ctx.fillStyle = i % 2 ? '#fff' : '#e74c3c'; ctx.fillRect(x + i * 8, y + d, 8, 10); }
+        ctx.strokeStyle = '#7b1d14'; ctx.lineWidth = 2; ctx.strokeRect(x + 1, y + d + 1, T - 2, 9);
       } else if (c === '-') {
         ctx.fillStyle = '#c8a165'; ctx.fillRect(x, y, T, 8);
         ctx.fillStyle = '#8d6b3c'; ctx.fillRect(x, y + 8, T, 2); ctx.fillRect(x + 4, y + 10, 3, 6); ctx.fillRect(x + T - 7, y + 10, 3, 6);
@@ -3171,13 +4318,35 @@ function drawTiles(me, now) {
   }
 }
 
-function drawCheckpointsAndFinish(me) {
+// Puerta: barrotes cuando está cerrada y la reja recogida cuando está abierta. Encima, una luz
+// (verde abierta, amarilla parpadeando si se va a cerrar, roja cerrada) y una barra con lo que le queda
+function drawDoorTile(map, tx, ty, x, y, shut, at, now) {
+  const T = CONFIG.TILE, top = !'Dd'.includes(at(tx, ty - 1)), left = doorLeft(map), D = map.door;
+  ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.fillRect(x, y, T, T);
+  ctx.fillStyle = '#566573'; ctx.fillRect(x, y, 4, T); ctx.fillRect(x + T - 4, y, 4, T);
+  if (shut) {
+    ctx.fillStyle = '#7f8c8d'; ctx.fillRect(x + 4, y, T - 8, T);
+    ctx.fillStyle = '#4d5656'; for (let i = 0; i < 3; i++) ctx.fillRect(x + 7 + i * 8, y, 3, T);
+    ctx.fillStyle = '#95a5a6'; ctx.fillRect(x + 4, y + T - 4, T - 8, 4);
+  } else if (top) {
+    ctx.fillStyle = '#7f8c8d'; ctx.fillRect(x + 4, y, T - 8, 6);
+  }
+  if (!top) return;
+  const warn = !shut && left < 0.8, col = shut ? '#ff4d4d' : warn ? (Math.floor(now / 100) % 2 ? '#ffd23f' : '#5a4a10') : '#2ecc71';
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x + T / 2, y + 8, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(14,18,36,.7)'; ctx.fillRect(x + 4, y + 16, T - 8, 4);
+  ctx.fillStyle = col; ctx.fillRect(x + 4, y + 16, (T - 8) * Math.min(1, left / (shut ? D.cycle - D.open : D.open)), 4);
+}
+
+function drawCheckpointsAndFinish(me, now) {
   const map = G.map, T = CONFIG.TILE;
   for (const cp of map.checkpoints) {
     const reached = me && me.checkpoint.x >= cp.x;
     ctx.fillStyle = '#ddd'; ctx.fillRect(cp.x - 2, cp.y - 64, 4, 64);
     ctx.fillStyle = reached ? '#2ecc71' : '#bdc3c7';
-    ctx.beginPath(); ctx.moveTo(cp.x + 2, cp.y - 64); ctx.lineTo(cp.x + 26, cp.y - 55); ctx.lineTo(cp.x + 2, cp.y - 46); ctx.fill();
+    const wv = Math.sin(now / 160 + cp.x) * 3;   // la bandera ondea
+    ctx.beginPath(); ctx.moveTo(cp.x + 2, cp.y - 64); ctx.quadraticCurveTo(cp.x + 14, cp.y - 60 + wv, cp.x + 26, cp.y - 55 + wv);
+    ctx.quadraticCurveTo(cp.x + 14, cp.y - 49 + wv, cp.x + 2, cp.y - 46); ctx.fill();
   }
   // meta: columna a cuadros
   const fx = map.finishX, s = 8;
@@ -3674,6 +4843,51 @@ function drawSpeech(text, x, y, a) {
   ctx.globalAlpha = 1;
 }
 
+// "Juice" del dibujo de cada jugador, con lo que se ve de él (así vale también para los remotos):
+// se estira al saltar, se aplasta al caer, levanta polvo al correr o derrapar y suena al saltar y al rebotar
+const freeBody = f => !(f & (F.CLIMB | F.AVION | F.GRABBED | F.DEAD | F.ABDUCT | F.PULL));
+function juice(p, v, dt) {
+  const J = p.jz, free = freeBody(v.flags), ground = free && Math.abs(v.vy) < 1;
+  if (ground && J.air && J.vy > 380) {
+    J.sq = Math.min(1, J.vy / 900);
+    dust(v.x, v.y, 3 + Math.round(J.sq * 8));
+    if (p.id === G.myId && J.vy > 520) Sfx.play('land', v.x, v.y, Math.min(1, J.vy / 900));
+  }
+  if (free && !J.air && v.vy < -300) {            // despega: salto o toldo
+    dust(v.x, v.y, 4);
+    if (v.vy < -1000 && trampAnim(v.x, v.y)) Sfx.play('boing', v.x, v.y);
+    else Sfx.play('jump', v.x, v.y, p.id === G.myId ? 1 : 0.35);
+  }
+  if (ground && Math.abs(v.vx) > 300 && (J.dustT -= dt) <= 0) { J.dustT = 0.08; dust(v.x - Math.sign(v.vx) * 8, v.y, 1); }
+  if (ground && J.vx * v.vx < 0 && Math.abs(J.vx) > 200) dust(v.x, v.y, 5);   // derrape al darse la vuelta
+  J.air = free && !ground; J.vy = v.vy; J.vx = v.vx;
+  J.sq = Math.max(0, J.sq - dt * 6); J.hitT = Math.max(0, J.hitT - dt);
+}
+
+// El toldo que hay bajo los pies de quien acaba de salir disparado se hunde un momento
+function trampAnim(x, y) {
+  const map = G.map, T = CONFIG.TILE, tx = Math.floor(x / T), ty0 = Math.floor(y / T);
+  for (let ty = ty0; ty < Math.min(map.H, ty0 + 5); ty++)
+    if ([tx - 1, tx, tx + 1].some(c => tileAt(map, c, ty) === 'T')) {
+      for (let c = tx - 1; c <= tx + 1; c++) if (tileAt(map, c, ty) === 'T') G.tramp.set(ty * map.W + c, 0.25);
+      return true;
+    }
+  return false;
+}
+
+// Estirar y aplastar el dibujo desde los pies; corriendo, rebota un poco y se inclina hacia delante
+function squash(p, v, now) {
+  const J = p.jz, f = v.flags;
+  if (!freeBody(f) || (f & F.FROZEN)) return;
+  const st = J.air && v.vy < 0 ? Math.min(1, -v.vy / 900) : 0;
+  let sx = 1 + 0.3 * J.sq - 0.12 * st, sy = 1 - 0.25 * J.sq + 0.14 * st, lean = 0;
+  if (!J.air && Math.abs(v.vx) > 40) {
+    const k = Math.min(1, Math.abs(v.vx) / CONFIG.RUN_SPEED);
+    sy *= 1 + Math.sin(now / 55) * 0.03 * k; lean = Math.sign(v.vx) * 0.07 * k;
+  }
+  ctx.translate(v.x, v.y); ctx.rotate(lean); ctx.scale(sx, sy); ctx.translate(-v.x, -v.y);
+}
+
 function drawPlayer(p, now, isMe) {
   const v = viewOf(p), f = v.flags, w = CONFIG.PLAYER_W, h = v.h;
   if (f & F.ABDUCT) {
@@ -3683,8 +4897,11 @@ function drawPlayer(p, now, isMe) {
     v.y -= Math.sin(Math.max(0, k) * Math.PI) * 80;
   }
   const x = v.x - w / 2, y = v.y - h;
+  juice(p, v, G.rdt);
   ctx.save();
   if (f & F.FINISHED) ctx.globalAlpha = 0.45;
+  ctx.save();
+  squash(p, v, now);
   if (f & F.DASH) {
     for (let i = 3; i >= 1; i--) { ctx.globalAlpha = 0.15 * (4 - i); drawFigure(p, v, false, -v.facing * i * 12); }
     ctx.globalAlpha = (f & F.FINISHED) ? 0.45 : 1;
@@ -3693,7 +4910,9 @@ function drawPlayer(p, now, isMe) {
   if ((f & F.AVION) && Math.random() < 0.7)
     G.fx.push({ x: v.x - v.facing * 44, y: v.y - 22 + (Math.random() - 0.5) * 6, vx: -v.facing * 120 + (Math.random() - 0.5) * 40,
                 vy: -20, life: 0.35, color: Math.random() < 0.5 ? '#d6d6d6' : '#9e9e9e' });
+  if (p.jz.hitT > 0) ctx.filter = 'brightness(3) saturate(0.3)';   // destello blanco al recibir un golpe
   const topY = drawFigure(p, v, isMe, 0);
+  ctx.restore();
   // estados
   if (f & F.LAG) {
     // tirones de lag: franjas verdes que parpadean sobre el personaje
@@ -3872,6 +5091,13 @@ function drawHUD(now) {
   const W = CONFIG.VIEW_W, H = CONFIG.VIEW_H, me = G.players.get(G.myId);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 
+  if (me) drawSpeedLines(me);
+  if (G.hurtFlash > 0) {
+    // borde rojo al recibir un golpe
+    const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, W * 0.62);
+    g.addColorStop(0, 'rgba(255,40,40,0)'); g.addColorStop(1, `rgba(255,40,40,${Math.min(0.55, G.hurtFlash * 1.6)})`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
   if (G.freezeFlash > 0) { ctx.fillStyle = `rgba(160,220,255,${G.freezeFlash * 0.5})`; ctx.fillRect(0, 0, W, H); }
   if (G.nukeFlash > 0) { ctx.fillStyle = `rgba(255,250,230,${Math.min(1, G.nukeFlash * 1.2)})`; ctx.fillRect(0, 0, W, H); }
   if (G.selfieFlash > 0) { ctx.fillStyle = `rgba(255,255,255,${G.selfieFlash * 2})`; ctx.fillRect(0, 0, W, H); }
@@ -3942,13 +5168,22 @@ function drawHUD(now) {
   if (G.offline && !Touch.on) drawKeyTester(10, 72);
 
   // cuenta atrás
-  let big = null;
-  if (G.mode === 'countdown') big = String(Math.ceil(G.countdown));
-  else if (G.mode === 'race' && G.raceTime < 0.8) big = '¡YA!';
+  if (G.mode === 'countdown') {
+    ctx.textAlign = 'center'; ctx.font = 'bold 22px system-ui'; ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.7)';
+    const mn = MAPS[G.map.key] ? MAPS[G.map.key].name : '';
+    ctx.strokeText(mn, W / 2, H / 2 + 60); ctx.fillStyle = '#fff'; ctx.fillText(mn, W / 2, H / 2 + 60);
+  }
+  // cada número entra grande y se encoge; el ¡YA! crece y se desvanece
+  let big = null, sc = 1, a = 1;
+  if (G.mode === 'countdown') { big = String(Math.ceil(G.countdown)); sc = 1 + 0.7 * Math.pow(G.countdown % 1, 3); }
+  else if (G.mode === 'race' && G.raceTime < 0.8) { big = '¡YA!'; sc = 1 + G.raceTime * 0.8; a = Math.min(1, (0.8 - G.raceTime) * 3); }
   if (big) {
+    ctx.save(); ctx.globalAlpha = a;
+    ctx.translate(W / 2, H / 2 - 20); ctx.scale(sc, sc);
     ctx.textAlign = 'center'; ctx.font = '900 96px system-ui';
-    ctx.lineWidth = 8; ctx.strokeStyle = '#1a1a2e'; ctx.strokeText(big, W / 2, H / 2 - 20);
-    ctx.fillStyle = '#ffd23f'; ctx.fillText(big, W / 2, H / 2 - 20);
+    ctx.lineWidth = 8; ctx.strokeStyle = '#1a1a2e'; ctx.strokeText(big, 0, 0);
+    ctx.fillStyle = '#ffd23f'; ctx.fillText(big, 0, 0);
+    ctx.restore();
   }
 }
 
@@ -4068,7 +5303,32 @@ function drawStatus(p) {
   ctx.strokeText(text, W / 2, H - 110); ctx.fillStyle = color; ctx.fillText(text, W / 2, H - 110);
 }
 
+function drawTexts() {
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.7)';
+  for (const t of G.texts) {
+    const sc = 1 + Math.max(0, t.t - 0.85) * 3;   // aparece con un pequeño golpe de tamaño
+    ctx.globalAlpha = Math.min(1, t.t * 2.5);
+    ctx.font = `900 ${Math.round(t.size * sc)}px system-ui`;
+    ctx.strokeText(t.text, t.x, t.y); ctx.fillStyle = t.color; ctx.fillText(t.text, t.x, t.y);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Rayas de velocidad en los bordes cuando vas más rápido que corriendo (bebida, Gordash, avión, dash…)
+function drawSpeedLines(me) {
+  const W = CONFIG.VIEW_W, H = CONFIG.VIEW_H, fast = Math.abs(me.vx) > CONFIG.RUN_SPEED * 1.08;
+  if (!fast || me.finished) return;
+  const k = Math.min(1, (Math.abs(me.vx) - CONFIG.RUN_SPEED) / 300 + 0.3), dir = Math.sign(me.vx);
+  ctx.fillStyle = `rgba(255,255,255,${0.3 * k})`;
+  for (let i = 0; i < 14; i++) {
+    const y = Math.random() * H, len = 60 + Math.random() * 160 * k;
+    if (y > H * 0.25 && y < H * 0.75 && Math.random() < 0.7) continue;   // sobre todo arriba y abajo
+    ctx.fillRect(dir > 0 ? Math.random() * W * 0.4 : W - Math.random() * W * 0.4 - len, y, len, 2);
+  }
+}
+
 function render(now, dt) {
+  G.rdt = dt;
   if (!G.map) { drawSky(now / 20); return; }
   for (const p of G.players.values()) if (!p.local) interp(p, now);
   updateCamera(dt);
@@ -4081,7 +5341,7 @@ function render(now, dt) {
   else ctx.translate(-Math.round(G.camX), -Math.round(G.camY));
   drawTiles(me, now);
   drawWalls(now);
-  drawCheckpointsAndFinish(me);
+  drawCheckpointsAndFinish(me, now);
   drawEnemies(now);
   drawBigs(now);
   drawMinions(now);
@@ -4091,8 +5351,9 @@ function render(now, dt) {
   drawWebs();
   for (const p of G.players.values()) if (p !== me) drawPlayer(p, now, false);
   if (me) drawPlayer(me, now, true);
-  for (const f of G.fx) { ctx.globalAlpha = Math.min(1, f.life * 2); ctx.fillStyle = f.color; ctx.fillRect(f.x - 2, f.y - 2, 4, 4); }
+  for (const f of G.fx) { const s = f.s || 4; ctx.globalAlpha = Math.min(1, f.life * 2); ctx.fillStyle = f.color; ctx.fillRect(f.x - s / 2, f.y - s / 2, s, s); }
   ctx.globalAlpha = 1;
+  drawTexts();
   drawRings();
   drawWaves(now);
   drawBeams();
@@ -4131,11 +5392,21 @@ const Musica = {
     }
     addEventListener('pointerdown', () => this.update());
     addEventListener('keydown', () => this.update());
-    $('btnMusic').onclick = () => {
-      this.muted = !this.muted;
-      try { localStorage.setItem('fatrace-mute', this.muted ? '1' : '0'); } catch (e) { /* sin almacenamiento */ }
-      this.update();
-    };
+    $('btnMusic').onclick = () => this.toggle();
+    // en la carrera no se ve el botón: la M silencia (si no es una tecla del juego)
+    addEventListener('keydown', e => {
+      if (e.code === 'KeyM' && !GAME_KEYS.has('KeyM') && !(e.target && e.target.tagName === 'INPUT') && G.mode !== 'menu') {
+        this.toggle();
+        toast(this.muted ? '🔇 Sonido apagado (M)' : '🔊 Sonido encendido (M)', '#cfd8f0');
+      }
+    });
+    this.update();
+  },
+  // Silencia todo: la música del menú, la de la carrera y los efectos
+  toggle() {
+    this.muted = !this.muted;
+    try { localStorage.setItem('fatrace-mute', this.muted ? '1' : '0'); } catch (e) { /* sin almacenamiento */ }
+    Sfx.applyMute();
     this.update();
   },
   update() {
@@ -4148,6 +5419,170 @@ const Musica = {
     } else this.audio.pause();
   },
 };
+// ---------- Efectos de sonido y música de carrera ----------
+// Todo se genera con Web Audio (osciladores y ruido), así que no pesa nada en el HTML.
+// Cada efecto son capas: { t: forma (sq, tri, saw, sin o noise), f: [Hz al empezar, Hz al acabar],
+// d: duración, v: volumen, at: retraso, ff/filt/q: filtro (lp, hp, bp) con su barrido, lfo: [Hz, profundidad] }.
+const SFX = {
+  jump:       [{ t: 'sq', f: [260, 560], d: 0.12, v: 0.12 }],
+  land:       [{ t: 'noise', d: 0.09, v: 0.22, ff: [700, 150] }, { t: 'sin', f: [140, 60], d: 0.1, v: 0.25 }],
+  boing:      [{ t: 'sin', f: [160, 720], d: 0.32, v: 0.35, lfo: [28, 40] }, { t: 'tri', f: [320, 1000], d: 0.22, v: 0.12 }],
+  stomp:      [{ t: 'sq', f: [700, 180], d: 0.13, v: 0.18 }, { t: 'noise', d: 0.06, v: 0.25, ff: [3000, 500] }],
+  hurt:       [{ t: 'saw', f: [420, 110], d: 0.25, v: 0.16 }, { t: 'noise', d: 0.12, v: 0.25, ff: [2000, 300] }],
+  hit:        [{ t: 'noise', d: 0.1, v: 0.3, ff: [2500, 300] }, { t: 'sq', f: [220, 90], d: 0.12, v: 0.14 }],
+  spike:      [{ t: 'saw', f: [900, 200], d: 0.18, v: 0.14 }, { t: 'noise', d: 0.1, v: 0.25, filt: 'hp', ff: [3000, 1500] }],
+  fall:       [{ t: 'sq', f: [700, 90], d: 0.55, v: 0.12 }],
+  checkpoint: [{ t: 'sq', f: [988], d: 0.08, v: 0.12 }, { t: 'sq', f: [1319], d: 0.25, v: 0.12, at: 0.08 }],
+  grab:       [{ t: 'sq', f: [320, 200], d: 0.07, v: 0.14 }, { t: 'sq', f: [260, 160], d: 0.07, v: 0.14, at: 0.06 }],
+  throw:      [{ t: 'noise', d: 0.25, v: 0.3, filt: 'bp', ff: [500, 3000], q: 2 }],
+  shoot:      [{ t: 'sq', f: [1000, 280], d: 0.12, v: 0.1 }],
+  pop:        [{ t: 'noise', d: 0.06, v: 0.25, ff: [4000, 800] }, { t: 'sin', f: [520, 240], d: 0.09, v: 0.2 }],
+  cast0:      [{ t: 'tri', f: [660, 990], d: 0.1, v: 0.16 }],
+  cast1:      [{ t: 'tri', f: [520, 780], d: 0.08, v: 0.16 }, { t: 'tri', f: [780, 1170], d: 0.1, v: 0.14, at: 0.07 }],
+  cast2:      [{ t: 'sq', f: [330, 660], d: 0.16, v: 0.1 }, { t: 'tri', f: [990, 1320], d: 0.12, v: 0.12, at: 0.1 }],
+  ulti:       [{ t: 'saw', f: [180, 900], d: 0.45, v: 0.14 }, { t: 'noise', d: 0.45, v: 0.18, filt: 'bp', ff: [300, 4000], q: 1.5 },
+               { t: 'sq', f: [880], d: 0.25, v: 0.08, at: 0.35 }],
+  boom:       [{ t: 'noise', d: 1.8, v: 0.7, ff: [1600, 60] }, { t: 'sin', f: [90, 28], d: 1.4, v: 0.6 }],
+  bombfall:   [{ t: 'sin', f: [1800, 500], d: 1.2, v: 0.12 }],
+  thump:      [{ t: 'sin', f: [100, 38], d: 0.35, v: 0.55 }, { t: 'noise', d: 0.2, v: 0.3, ff: [500, 80] }],
+  punch:      [{ t: 'noise', d: 0.12, v: 0.4, ff: [1800, 200] }, { t: 'sq', f: [160, 70], d: 0.12, v: 0.15 }],
+  freeze:     [{ t: 'sin', f: [1400, 2600], d: 0.5, v: 0.12, lfo: [18, 120] }, { t: 'tri', f: [2093], d: 0.3, v: 0.08, at: 0.1 }],
+  glitch:     [0, 0.05, 0.1, 0.16, 0.22].map((at, i) => ({ t: 'sq', f: [[180, 1400, 600, 2200, 300][i]], d: 0.04, v: 0.1, at })),
+  guitar:     [196, 247, 294, 392].map((f, i) => ({ t: 'saw', f: [f], d: 0.7, v: 0.08, at: i * 0.025, ff: [3000, 400] })),
+  chime:      [880, 1109, 1319].map((f, i) => ({ t: 'sin', f: [f], d: 0.5, v: 0.14, at: i * 0.07 })),
+  bell:       [{ t: 'sin', f: [1568], d: 0.9, v: 0.14 }, { t: 'sin', f: [2349], d: 0.6, v: 0.06 }],
+  zap:        [{ t: 'saw', f: [1800, 120], d: 0.25, v: 0.13 }, { t: 'noise', d: 0.2, v: 0.25, filt: 'hp', ff: [5000, 2000] }],
+  choir:      [220, 277, 330].map(f => ({ t: 'tri', f: [f], d: 1.1, v: 0.1, a: 0.25 })),
+  powerup:    [523, 659, 784, 1047].map((f, i) => ({ t: 'sq', f: [f], d: 0.09, v: 0.1, at: i * 0.06 })),
+  powerdown:  [{ t: 'sq', f: [600, 150], d: 0.5, v: 0.1, lfo: [9, 40] }],
+  nom:        [{ t: 'noise', d: 0.06, v: 0.2, ff: [1200] }, { t: 'noise', d: 0.06, v: 0.2, ff: [900], at: 0.12 }],
+  glug:       [0, 0.11, 0.22].map(at => ({ t: 'sin', f: [340, 160], d: 0.09, v: 0.22, at })),
+  hiss:       [{ t: 'noise', d: 0.45, v: 0.18, filt: 'hp', ff: [3000, 6000] }],
+  splat:      [{ t: 'noise', d: 0.18, v: 0.35, ff: [1500, 200] }],
+  web:        [{ t: 'sin', f: [1600, 300], d: 0.14, v: 0.18 }],
+  gun:        [{ t: 'noise', d: 0.08, v: 0.4, ff: [5000, 900] }, { t: 'sq', f: [900, 200], d: 0.08, v: 0.08 }],
+  ufo:        [{ t: 'sin', f: [500, 900], d: 1.1, v: 0.12, lfo: [7, 120] }],
+  click:      [{ t: 'noise', d: 0.03, v: 0.4, filt: 'hp', ff: [3000] }, { t: 'noise', d: 0.04, v: 0.3, filt: 'hp', ff: [2000], at: 0.06 }],
+  crowd:      [{ t: 'noise', d: 1.2, v: 0.25, filt: 'bp', ff: [700, 1400], q: 0.8, a: 0.4 }],
+  whistle:    [{ t: 'sin', f: [1300, 1900], d: 0.18, v: 0.14 }, { t: 'sin', f: [1900, 1200], d: 0.25, v: 0.14, at: 0.2 }],
+  ko:         [{ t: 'saw', f: [320, 60], d: 0.6, v: 0.14 }],
+  roulette:   [0, 0.07, 0.14, 0.22, 0.31, 0.42, 0.56].map(at => ({ t: 'sq', f: [1500], d: 0.025, v: 0.08, at })),
+  jet:        [{ t: 'noise', d: 0.8, v: 0.25, filt: 'bp', ff: [200, 1200], q: 1, a: 0.15 }],
+  door:       [{ t: 'sq', f: [110, 70], d: 0.14, v: 0.12 }, { t: 'noise', d: 0.1, v: 0.2, ff: [900, 200] }],
+  beep:       [{ t: 'sq', f: [523], d: 0.14, v: 0.14 }],
+  go:         [{ t: 'sq', f: [1047], d: 0.4, v: 0.14 }, { t: 'sq', f: [1568], d: 0.4, v: 0.08 }],
+  tick:       [{ t: 'sq', f: [1400], d: 0.035, v: 0.07 }],
+  fanfare:    [523, 659, 784, 1047, 784, 1047].map((f, i) => ({ t: 'sq', f: [f], d: i === 5 ? 0.5 : 0.11, v: 0.12, at: i * 0.11 })),
+  ding:       [{ t: 'tri', f: [1319], d: 0.3, v: 0.14 }],
+  shield:     [{ t: 'tri', f: [700, 1400], d: 0.2, v: 0.12, lfo: [30, 60] }],
+};
+
+const Sfx = {
+  ctx: null, out: null, sfxBus: null, musicBus: null, noise: null, last: {}, missing: 0,
+  init() {
+    const unlock = () => this.unlock();
+    addEventListener('pointerdown', unlock, true);
+    addEventListener('keydown', unlock, true);
+  },
+  // El navegador no deja crear el sonido hasta el primer gesto del jugador
+  unlock() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      try {
+        const c = this.ctx = new AC();
+        this.out = c.createGain(); this.out.connect(c.destination);
+        this.sfxBus = c.createGain(); this.sfxBus.gain.value = 0.6; this.sfxBus.connect(this.out);
+        this.musicBus = c.createGain(); this.musicBus.gain.value = 0.35; this.musicBus.connect(this.out);
+        const n = c.sampleRate, buf = c.createBuffer(1, n, n), d = buf.getChannelData(0);
+        for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+        this.noise = buf;
+      } catch (e) { this.ctx = null; return; }
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => { /* aún sin gesto */ });
+    this.applyMute();
+  },
+  applyMute() { if (this.out) this.out.gain.value = Musica.muted ? 0 : 1; },
+  // x, y: dónde suena en el mapa. Fuera de la pantalla se oye menos (y nada si está lejos) y a izquierda/derecha según el lado
+  play(name, x, y, vol) {
+    const L = SFX[name];
+    if (!L) { this.missing++; console.warn('Sonido desconocido: ' + name); return; }
+    if (!this.ctx || Musica.muted) return;
+    const now = this.ctx.currentTime;
+    if (this.last[name] > now - 0.045) return;          // el mismo sonido muchas veces a la vez satura
+    this.last[name] = now;
+    let k = vol || 1, pan = 0;
+    if (x != null && G.map) {
+      const W = CONFIG.VIEW_W / G.zoom, H = CONFIG.VIEW_H / G.zoom, cx = G.camX + W / 2, cy = G.camY + H / 2;
+      const out = Math.max(0, Math.abs(x - cx) - W / 2, Math.abs((y == null ? cy : y) - cy) - H / 2);
+      k *= Math.max(0, 1 - out / 500);
+      if (k <= 0.02) return;
+      pan = Math.max(-1, Math.min(1, (x - cx) / (W / 2))) * 0.6;
+    }
+    let dest = this.sfxBus;
+    if (pan && this.ctx.createStereoPanner) { dest = this.ctx.createStereoPanner(); dest.pan.value = pan; dest.connect(this.sfxBus); }
+    for (const l of L) this.layer(l, now, k, dest);
+  },
+  layer(L, now, k, dest) {
+    const c = this.ctx, t = now + (L.at || 0), d = L.d, g = c.createGain();
+    let src;
+    if (L.t === 'noise') { src = c.createBufferSource(); src.buffer = this.noise; src.loop = true; }
+    else {
+      src = c.createOscillator();
+      src.type = { sq: 'square', tri: 'triangle', saw: 'sawtooth', sin: 'sine' }[L.t];
+      src.frequency.setValueAtTime(L.f[0], t);
+      if (L.f[1]) src.frequency.exponentialRampToValueAtTime(L.f[1], t + d);
+      if (L.lfo) {
+        const lfo = c.createOscillator(), lg = c.createGain();
+        lfo.frequency.value = L.lfo[0]; lg.gain.value = L.lfo[1];
+        lfo.connect(lg); lg.connect(src.frequency); lfo.start(t); lfo.stop(t + d + 0.05);
+      }
+    }
+    let node = src;
+    if (L.ff) {
+      const fl = c.createBiquadFilter();
+      fl.type = { lp: 'lowpass', hp: 'highpass', bp: 'bandpass' }[L.filt || 'lp'];
+      fl.frequency.setValueAtTime(L.ff[0], t);
+      if (L.ff[1]) fl.frequency.exponentialRampToValueAtTime(L.ff[1], t + d);
+      fl.Q.value = L.q || 1;
+      node.connect(fl); node = fl;
+    }
+    node.connect(g); g.connect(dest);
+    const peak = Math.max(0.0002, L.v * k);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + (L.a || 0.006));
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    src.start(t); src.stop(t + d + 0.05);
+  },
+
+  // Música de carrera: chiptune en La menor (Am F C G) que se programa un poco por delante.
+  // En los últimos 20 s va más rápida y con el arpegio una octava más alto.
+  music: { on: false, step: 0, next: 0 },
+  updateMusic() {
+    const M = this.music, want = !!this.ctx && !Musica.muted && (G.mode === 'race' || G.mode === 'countdown') && G.raceTime < CONFIG.RACE_TIME;
+    if (!want) { M.on = false; return; }
+    const c = this.ctx;
+    if (!M.on) { M.on = true; M.step = 0; M.next = c.currentTime + 0.05; }
+    const hurry = CONFIG.RACE_TIME - G.raceTime < 20, dur = 60 / (hurry ? 168 : 140) / 4;   // semicorchea
+    while (M.next < c.currentTime + 0.15) {
+      this.musicStep(M.step, M.next, dur, hurry);
+      M.step = (M.step + 1) % 64; M.next += dur;
+    }
+  },
+  musicStep(step, t, dur, hurry) {
+    const CH = [[45, [69, 72, 76]], [41, [65, 69, 72]], [48, [67, 72, 76]], [43, [67, 71, 74]]];   // bajo y acorde de cada compás
+    const [root, chord] = CH[Math.floor(step / 16)], s = step % 16, hz = n => 440 * Math.pow(2, (n - 69) / 12);
+    const note = (type, n, d, v, ff) => this.layer({ t: type, f: [hz(n)], d, v, ff }, t, 1, this.musicBus);
+    if (G.mode !== 'race') { if (s % 4 === 0) note('tri', root + 12, dur * 2, 0.25); return; }   // cuenta atrás: solo el bajo
+    if (s % 2 === 0) note('tri', root + (s % 4 === 2 ? 12 : 0), dur * 1.8, 0.32);
+    const arp = [0, 1, 2, 1, 0, 1, 2, 3, 0, 1, 2, 1, 3, 2, 1, 2][s], n = (arp === 3 ? chord[0] + 12 : chord[arp]) + (hurry ? 12 : 0);
+    note('sq', n, dur * 0.9, 0.06, [2600]);
+    if (s === 0 || s === 8 || s === 10) this.layer({ t: 'sin', f: [150, 40], d: 0.14, v: 0.5 }, t, 1, this.musicBus);           // bombo
+    if (s === 4 || s === 12) this.layer({ t: 'noise', d: 0.12, v: 0.2, filt: 'hp', ff: [1500] }, t, 1, this.musicBus);          // caja
+    if (s % 2 === 1 || hurry) this.layer({ t: 'noise', d: 0.03, v: 0.06, filt: 'hp', ff: [7000] }, t, 1, this.musicBus);        // charles
+  },
+};
+
 function setMenuMsg(m) { $('menuMsg').textContent = m; }
 
 function readMenu() {
@@ -4196,6 +5631,34 @@ function renderCharPickers() {
   }
 }
 
+// ---------- Mapa: lo elige el anfitrión en la sala (y cada uno el suyo para la práctica) ----------
+function setMapKey(k) {
+  G.mapKey = lobbyMapKey(k);
+  try { localStorage.setItem('fatrace-mapa', G.mapKey); } catch (e) { /* sin almacenamiento */ }
+  if (G.mode === 'lobby' && G.isHost && G.net) hostBroadcastLobby();
+  renderMapPickers();
+}
+
+function renderMapPickers() {
+  const options = [...Object.entries(MAPS).map(([k, m]) => [k, m.name, m.desc]), [MAP_RANDOM, '🎲 Al azar', 'Un mapa distinto en cada carrera']];
+  const sel = $('mapSelect');
+  sel.innerHTML = '';
+  for (const [k, name] of options) { const o = document.createElement('option'); o.value = k; o.textContent = name; sel.appendChild(o); }
+  sel.value = G.mapKey;
+  const box = $('mapPick'), current = G.isHost ? G.mapKey : G.lobbyMap;
+  box.innerHTML = '';
+  for (const [k, name, desc] of options) {
+    const card = document.createElement('div');
+    card.className = 'char' + (k === current ? ' sel' : '') + (G.isHost ? '' : ' ro');
+    const b = document.createElement('b'); b.textContent = name;
+    const s = document.createElement('span'); s.textContent = desc;
+    card.append(b, s);
+    if (G.isHost) card.onclick = () => setMapKey(k);
+    box.appendChild(card);
+  }
+  $('mapWho').textContent = G.isHost ? '(eliges tú)' : '(lo elige el anfitrión)';
+}
+
 // ---------- Cambiar teclas (menú > Controles) ----------
 let rebinding = null;   // acción que espera su tecla nueva
 
@@ -4225,8 +5688,9 @@ addEventListener('keydown', e => {
 
 function showLobby() {
   showPanel('lobby');
-  $('lobbyCode').textContent = G.code || '----';
-  $('lobbyRole').textContent = G.isHost ? 'Eres el anfitrión. Comparte el código.' : 'Conectado a la sala.';
+  $('lobbyCode').textContent = G.offline ? '🤖' : G.code || '----';
+  $('lobbyRole').textContent = G.offline ? 'Sin red: tú contra los bots. Añade o quita bots y elige el mapa.'
+    : G.isHost ? 'Eres el anfitrión. Comparte el código. Los huecos libres se pueden llenar con bots.' : 'Conectado a la sala.';
   renderLobby();
 }
 
@@ -4238,16 +5702,26 @@ function renderLobby() {
     const dot = document.createElement('span'); dot.className = 'dot'; dot.style.background = p.color;
     const name = document.createElement('span'); name.textContent = p.name;
     const tag = document.createElement('span'); tag.className = 'tag';
-    tag.textContent = [CHARACTERS[validChar(p.char)].name, p.id === 0 ? 'anfitrión' : '', p.id === G.myId ? 'tú' : ''].filter(Boolean).join(' · ');
+    tag.textContent = [CHARACTERS[validChar(p.char)].name, p.ai ? 'bot' : '', p.id === 0 && !G.offline ? 'anfitrión' : '', p.id === G.myId ? 'tú' : ''].filter(Boolean).join(' · ');
     li.append(dot, name, tag);
+    if (p.ai && G.isHost) {
+      const re = document.createElement('button'), rm = document.createElement('button');
+      re.className = rm.className = 'mini';
+      re.textContent = '🎲'; re.title = 'Otro personaje al azar'; re.onclick = () => hostRerollBot(p.id);
+      rm.textContent = '✕'; rm.title = 'Quitar el bot'; rm.onclick = () => hostRemoveBot(p.id);
+      li.append(re, rm);
+    }
     ul.appendChild(li);
   }
   renderCharPickers();
+  renderMapPickers();
   if (!G.lobby.length) {
     const li = document.createElement('li'); li.textContent = 'Esperando jugadores…'; ul.appendChild(li);
   }
   const n = G.lobby.length;
   $('btnStart').classList.toggle('hidden', !G.isHost);
+  $('btnAddBot').classList.toggle('hidden', !G.isHost);
+  $('btnAddBot').disabled = n >= CONFIG.MAX_PLAYERS;
   $('btnStart').disabled = n < 1;
   $('btnStart').textContent = `Empezar carrera (${n}/${CONFIG.MAX_PLAYERS})`;
   $('lobbyWait').classList.toggle('hidden', G.isHost);
@@ -4267,7 +5741,7 @@ function showResults(list) {
     li.append(dot, name, tag);
     ol.appendChild(li);
   });
-  $('btnBackLobby').classList.toggle('hidden', !G.isHost || G.offline);
+  $('btnBackLobby').classList.toggle('hidden', !G.isHost || G.practice);
   $('btnRetry').classList.toggle('hidden', !G.offline);
   $('resultsWait').classList.toggle('hidden', G.isHost);
 }
@@ -4278,28 +5752,38 @@ function initUI() {
     const c = localStorage.getItem('fatrace-color');
     if (COLORS.includes(c)) G.myColor = c;
     G.myChar = validChar(localStorage.getItem('fatrace-char'));
+    G.mapKey = lobbyMapKey(localStorage.getItem('fatrace-mapa') || 'prueba');
   } catch (e) { /* sin almacenamiento */ }
   buildColorPicker();
   renderCharPickers();
+  renderMapPickers();
+  $('mapSelect').onchange = e => setMapKey(e.target.value);
   renderKeys();
   $('btnResetKeys').onclick = () => { rebinding = null; resetKeys(); saveKeys(); renderKeys(); };
   $('btnHost').onclick = () => { Touch.fullscreen(); startHosting(); };
   $('btnJoin').onclick = () => { Touch.fullscreen(); joinRoom(); };
   $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom(); });
   $('btnPractice').onclick = () => { Touch.fullscreen(); startPractice(); };
+  $('btnBots').onclick = () => { Touch.fullscreen(); startBotRoom(); };
+  $('btnAddBot').onclick = hostAddBot;
   $('btnStart').onclick = hostStart;
   $('btnLeave').onclick = () => leaveToMenu('');
   $('btnBackLobby').onclick = () => { G.net.broadcast({ t: 'toLobby' }); hostBroadcastLobby(); };
   $('btnRetry').onclick = hostStart;
   $('btnExit').onclick = () => leaveToMenu('');
   Musica.init();
+  Sfx.init();
 }
 
 Input.init();
 Touch.init();
 initUI();
-addEventListener('resize', resize);
-resize();
+function relayout() { resize(); Touch.layout(); }
+addEventListener('resize', relayout);
+if (window.visualViewport) visualViewport.addEventListener('resize', relayout);
+addEventListener('orientationchange', () => setTimeout(relayout, 300));   // iOS da el tamaño viejo justo al girar
+$('iosHint').classList.toggle('hidden', !IPHONE_SAFARI);
+relayout();
 requestAnimationFrame(frame);
 </script>
 </body>
